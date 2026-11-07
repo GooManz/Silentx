@@ -1,0 +1,3518 @@
+--[[
+    ============================================================================
+    SxUI - Compact Modular Roblox UI Library (Update 1.2 - Bundled Edition)
+    ============================================================================
+    Catatan Update 1.2:
+    1. Header Atas bertuliskan "Slientx" lengkap dengan Icon Roblox Asset ID
+       dan Garis Pembatas (Header Divider) tegas di bawahnya sebelum daftar fitur.
+    2. Mendukung penuh Roblox Asset ID Icon (ImageLabel) di seluruh komponen,
+       tab, header, dan sub-indikator (panah dropdown, centang checkbox, accordion,
+       chevron button, refresh, trash/delete, dll) -- 100% BEBAS EMOJI TEKS!
+    3. Main Features Container menggunakan ScrollingFrame mulus (Smooth Scroll,
+       AutomaticCanvasSize Y, + Kalkulasi UIListLayout.AbsoluteContentSize otomatis)
+       sehingga puluhan fitur di bawah pembatas "Slientx" dapat di-scroll dengan lancar.
+       Mendukung mode Single-Scroll langsung (Window:Add...) maupun Multi-Tab.
+    4. Floating Button Bulat "Sx" (Garis Tepi Putih Agak Tebal 2.5px) BISA DI-DRAG,
+       sedangkan Main Compact Window tetap di Kanan-Tengah layar (Min 280px,
+       Default 300px) dan TIDAK BISA DI-DRAG.
+    5. Total 40 Komponen UI Interaktif (30 Komponen sebelumnya + 10 Komponen Baru
+       Update 1.2: AvatarCard, KeyValueList, IconGridPicker,StopwatchCard,
+       DualProgressBar, DirectionPad,TagListEditor, SpeedometerGauge,
+       ActionBanner, danQuickSlotBar).
+    6. Auto-Cleanup & Anti-Duplicate (__SX_COMPACT_UI_INSTANCE__) otomatis mematikan
+       semua fungsi, koneksi, dan menghapus UI lama jika dijalankan lebih dari 1 kali.
+    ============================================================================
+]]
+
+local __MODULES__ = {}
+local __CACHE__ = {}
+
+local function RegisterModule(name, fn)
+    __MODULES__[name] = fn
+end
+
+local function LoadModule(name)
+    if not __CACHE__[name] then
+        assert(__MODULES__[name], "[SxUI] Module tidak ditemukan: " .. tostring(name))
+        __CACHE__[name] = __MODULES__[name](LoadModule)
+    end
+    return __CACHE__[name]
+end
+
+-- ============================================================================
+-- MODULE 1: CleanupManager (Anti-Duplicate & Memory/Connection Janitor)
+-- ============================================================================
+RegisterModule("CleanupManager", function(require)
+    local CleanupManager = {}
+    CleanupManager.__index = CleanupManager
+
+    local GLOBAL_KEY = "__SX_COMPACT_UI_INSTANCE__"
+
+    function CleanupManager.new()
+        local self = setmetatable({
+            Connections = {},
+            Threads = {},
+            Instances = {},
+            Callbacks = {},
+            IsDestroyed = false
+        }, CleanupManager)
+        return self
+    end
+
+    function CleanupManager:PurgeExisting()
+        local env = (getgenv and getgenv()) or _G
+        if env[GLOBAL_KEY] and type(env[GLOBAL_KEY].Destroy) == "function" then
+            pcall(function()
+                env[GLOBAL_KEY]:Destroy()
+            end)
+        end
+        env[GLOBAL_KEY] = self
+    end
+
+    function CleanupManager:AddConnection(conn)
+        if self.IsDestroyed then
+            if conn and conn.Disconnect then conn:Disconnect() end
+            return conn
+        end
+        table.insert(self.Connections, conn)
+        return conn
+    end
+
+    function CleanupManager:Connect(signal, callback)
+        local conn = signal:Connect(function(...)
+            if self.IsDestroyed then return end
+            callback(...)
+        end)
+        return self:AddConnection(conn)
+    end
+
+    function CleanupManager:AddThread(thread)
+        if self.IsDestroyed then
+            pcall(task.cancel, thread)
+            return thread
+        end
+        table.insert(self.Threads, thread)
+        return thread
+    end
+
+    function CleanupManager:SpawnLoop(interval, fn)
+        local thread = task.spawn(function()
+            while not self.IsDestroyed do
+                local ok, err = pcall(fn)
+                if not ok then warn("[SxUI Loop Error]:", err) end
+                task.wait(interval or 0.1)
+            end
+        end)
+        return self:AddThread(thread)
+    end
+
+    function CleanupManager:AddInstance(inst)
+        if self.IsDestroyed then
+            pcall(function() inst:Destroy() end)
+            return inst
+        end
+        table.insert(self.Instances, inst)
+        return inst
+    end
+
+    function CleanupManager:OnDestroy(fn)
+        table.insert(self.Callbacks, fn)
+    end
+
+    function CleanupManager:Destroy()
+        if self.IsDestroyed then return end
+        self.IsDestroyed = true
+
+        for _, thread in ipairs(self.Threads) do
+            pcall(task.cancel, thread)
+        end
+        table.clear(self.Threads)
+
+        for _, conn in ipairs(self.Connections) do
+            pcall(function()
+                if conn and conn.Connected then
+                    conn:Disconnect()
+                end
+            end)
+        end
+        table.clear(self.Connections)
+
+        for _, fn in ipairs(self.Callbacks) do
+            pcall(fn)
+        end
+        table.clear(self.Callbacks)
+
+        for _, inst in ipairs(self.Instances) do
+            pcall(function()
+                if inst and inst.Parent then
+                    inst:Destroy()
+                end
+            end)
+        end
+        table.clear(self.Instances)
+    end
+
+    return CleanupManager
+end)
+
+-- ============================================================================
+-- MODULE 2: Theme (Tema Aksen Natural, Rapih & Modern)
+-- ============================================================================
+RegisterModule("Theme", function(require)
+    return {
+        BgPrimary      = Color3.fromRGB(20, 23, 28),
+        BgSecondary    = Color3.fromRGB(27, 31, 38),
+        BgTertiary     = Color3.fromRGB(35, 40, 49),
+        Accent         = Color3.fromRGB(52, 168, 122),
+        AccentSoft     = Color3.fromRGB(38, 125, 90),
+        AccentBright   = Color3.fromRGB(76, 198, 148),
+        TextPrimary    = Color3.fromRGB(240, 244, 248),
+        TextSecondary  = Color3.fromRGB(160, 170, 184),
+        TextMuted      = Color3.fromRGB(108, 117, 130),
+        Stroke         = Color3.fromRGB(48, 55, 66),
+        DividerAccent  = Color3.fromRGB(52, 168, 122),
+        WhiteStroke    = Color3.fromRGB(255, 255, 255),
+        Success        = Color3.fromRGB(56, 189, 126),
+        Warning        = Color3.fromRGB(235, 170, 52),
+        Danger         = Color3.fromRGB(225, 82, 82),
+        FontMain       = Enum.Font.GothamMedium,
+        FontBold       = Enum.Font.GothamBold,
+        FontRegular    = Enum.Font.Gotham,
+        FontMono       = Enum.Font.Code
+    }
+end)
+
+-- ============================================================================
+-- MODULE 3: AssetResolver (Mendukung Penuh Roblox Asset ID Icon & Built-in Lucide Icons)
+-- ============================================================================
+RegisterModule("AssetResolver", function(require)
+    local AssetResolver = {}
+
+    -- Kumpulan Roblox Asset ID Icon resmi (Lucide / Feather Icon Pack di Roblox)
+    -- Bebas emoji teks: semua simbol menggunakan ImageLabel Asset ID!
+    local BuiltinIcons = {
+        home         = "rbxassetid://10723407389",
+        settings     = "rbxassetid://10734950309",
+        user         = "rbxassetid://10747373176",
+        users        = "rbxassetid://10747373426",
+        star         = "rbxassetid://10709818626",
+        bolt         = "rbxassetid://10709782154",
+        shield       = "rbxassetid://10734951847",
+        search       = "rbxassetid://10734943674",
+        info         = "rbxassetid://10723415903",
+        check        = "rbxassetid://10709790644",
+        bell         = "rbxassetid://10709775704",
+        pin          = "rbxassetid://10734922324",
+        compass      = "rbxassetid://10709811445",
+        terminal     = "rbxassetid://10734982144",
+        chevronright = "rbxassetid://10709791437",
+        chevrondown  = "rbxassetid://10709790948",
+        chevronup    = "rbxassetid://10709791523",
+        refresh      = "rbxassetid://10734940376",
+        trash        = "rbxassetid://10747362393",
+        copy         = "rbxassetid://10709812159",
+        clock        = "rbxassetid://10709805144",
+        gauge        = "rbxassetid://10723396107",
+        tag          = "rbxassetid://10734976528",
+        grid         = "rbxassetid://10723404936",
+        list         = "rbxassetid://10723433811",
+        move         = "rbxassetid://10734898355",
+        layers       = "rbxassetid://10723424505",
+        play         = "rbxassetid://10734923549",
+        pause        = "rbxassetid://10734919336",
+        plus         = "rbxassetid://10734924532",
+        minus        = "rbxassetid://10734896206"
+    }
+
+    function AssetResolver.Format(iconInput)
+        if not iconInput or iconInput == "" or iconInput == 0 then
+            return nil
+        end
+        if type(iconInput) == "number" then
+            return "rbxassetid://" .. tostring(iconInput)
+        elseif type(iconInput) == "string" then
+            local trimmed = iconInput:match("^%s*(.-)%s*$")
+            local lower = trimmed:lower()
+            if BuiltinIcons[lower] then
+                return BuiltinIcons[lower]
+            elseif trimmed:match("^%d+$") then
+                return "rbxassetid://" .. trimmed
+            elseif trimmed:find("^rbxassetid://") or trimmed:find("^http") or trimmed:find("^rbxthumb://") then
+                return trimmed
+            else
+                return "rbxassetid://" .. trimmed
+            end
+        end
+        return nil
+    end
+
+    return AssetResolver
+end)
+
+-- ============================================================================
+-- MODULE 4: DomUtils (Helper Instance, Tween, Corner, Stroke, Roblox Icon)
+-- ============================================================================
+RegisterModule("DomUtils", function(require)
+    local TweenService = game:GetService("TweenService")
+    local Theme = require("Theme")
+    local AssetResolver = require("AssetResolver")
+
+    local DomUtils = {}
+
+    function DomUtils.Create(className, props, children)
+        local inst = Instance.new(className)
+        for k, v in pairs(props or {}) do
+            if k ~= "Parent" then
+                inst[k] = v
+            end
+        end
+        for _, child in ipairs(children or {}) do
+            child.Parent = inst
+        end
+        if props and props.Parent then
+            inst.Parent = props.Parent
+        end
+        return inst
+    end
+
+    function DomUtils.Corner(parent, radius)
+        return DomUtils.Create("UICorner", {
+            CornerRadius = UDim.new(0, radius or 6),
+            Parent = parent
+        })
+    end
+
+    function DomUtils.Stroke(parent, color, thickness, transparency)
+        return DomUtils.Create("UIStroke", {
+            Color = color or Theme.Stroke,
+            Thickness = thickness or 1,
+            Transparency = transparency or 0,
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Parent = parent
+        })
+    end
+
+    function DomUtils.Padding(parent, top, bottom, left, right)
+        return DomUtils.Create("UIPadding", {
+            PaddingTop = UDim.new(0, top or 6),
+            PaddingBottom = UDim.new(0, bottom or 6),
+            PaddingLeft = UDim.new(0, left or 8),
+            PaddingRight = UDim.new(0, right or 8),
+            Parent = parent
+        })
+    end
+
+    function DomUtils.Tween(inst, duration, goal, style, dir)
+        local info = TweenInfo.new(
+            duration or 0.18,
+            style or Enum.EasingStyle.Quad,
+            dir or Enum.EasingDirection.Out
+        )
+        local tw = TweenService:Create(inst, info, goal)
+        tw:Play()
+        return tw
+    end
+
+    function DomUtils.CreateIcon(parent, iconId, size, color)
+        local resolved = AssetResolver.Format(iconId)
+        if not resolved then return nil end
+        return DomUtils.Create("ImageLabel", {
+            Name = "Icon",
+            BackgroundTransparency = 1,
+            Image = resolved,
+            ImageColor3 = color or Theme.AccentBright,
+            Size = UDim2.new(0, size or 16, 0, size or 16),
+            AnchorPoint = Vector2.new(0, 0.5),
+            Position = UDim2.new(0, 0, 0.5, 0),
+            Parent = parent
+        })
+    end
+
+    function DomUtils.CreateCard(parent, minHeight)
+        local card = Dom.Create("Frame", {
+            BackgroundColor3 = Theme.BgSecondary,
+            Size = UDim2.new(1, 0, 0, minHeight or 34),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            BorderSizePixel = 0,
+            Parent = parent
+        })
+        DomUtils.Corner(card, 6)
+        DomUtils.Stroke(card, Theme.Stroke, 1)
+        DomUtils.Padding(card, 7, 7, 9, 9)
+        return card
+    end
+
+    function DomUtils.CreateHeaderRow(parent, text, iconId, rightOffset)
+        local row = DomUtils.Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, -(rightOffset or 0), 0, 18),
+            Parent = parent
+        })
+        -- Default icon otomatis memakai Roblox Asset ID jika user tidak mengisi iconId
+        local icon = DomUtils.CreateIcon(row, iconId or "layers", 15, Theme.AccentBright)
+        local leftPad = icon and 21 or 0
+        local label = DomUtils.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, leftPad, 0, 0),
+            Size = UDim2.new(1, -leftPad, 1, 0),
+            Font = Theme.FontMain,
+            Text = text or "Component",
+            TextColor3 = Theme.TextPrimary,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Parent = row
+        })
+        return row, label, icon
+    end
+
+    -- Helper membuat ScrollingFrame yang dijamin 100% bisa di-scroll di semua executor
+    function DomUtils.BindAutoCanvas(scrollingFrame, uiListLayout, extraBottomPadding)
+        local pad = extraBottomPadding or 14
+        local function updateCanvas()
+            if scrollingFrame and scrollingFrame.Parent and uiListLayout then
+                scrollingFrame.CanvasSize = UDim2.new(0, 0, 0, uiListLayout.AbsoluteContentSize.Y + pad)
+            end
+        end
+        uiListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateCanvas)
+        task.defer(updateCanvas)
+        return updateCanvas
+    end
+
+    return DomUtils
+end)
+
+-- ============================================================================
+-- MODULE 5: Components (40 Komponen UI Lengkap, Full Roblox Asset ID Icons, 0 Emoji)
+-- ============================================================================
+RegisterModule("Components", function(require)
+    local UserInputService = game:GetService("UserInputService")
+    local Players = game:GetService("Players")
+    local Theme = require("Theme")
+    local Dom = require("DomUtils")
+    local AssetResolver = require("AssetResolver")
+
+    local Components = {}
+
+    function Components.Attach(TabPrototype)
+
+        -- [1] Section: Pengelompokan judul kategori dengan Icon Asset ID
+        function TabPrototype:AddSection(opts)
+            opts = opts or {}
+            local holder = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 22),
+                Parent = self.Container
+            })
+            local icon = Dom.CreateIcon(holder, opts.Icon or "layers", 14, Theme.Accent)
+            local xOffset = icon and 19 or 2
+            local lbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, xOffset, 0, 0),
+                Size = UDim2.new(1, -xOffset, 1, 0),
+                Font = Theme.FontBold,
+                Text = string.upper(opts.Title or "SECTION"),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = holder
+            })
+            return {
+                SetTitle = function(_, newTitle) lbl.Text = string.upper(newTitle) end
+            }
+        end
+
+        -- [2] Divider: Garis pemisah visual
+        function TabPrototype:AddDivider(opts)
+            opts = opts or {}
+            local holder = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, opts.Text and 16 or 8),
+                Parent = self.Container
+            })
+            Dom.Create("Frame", {
+                BackgroundColor3 = Theme.Stroke,
+                BorderSizePixel = 0,
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 0, 0.5, 0),
+                Size = UDim2.new(1, 0, 0, 1),
+                Parent = holder
+            })
+            if opts.Text then
+                local badge = Dom.Create("TextLabel", {
+                    BackgroundColor3 = Theme.BgPrimary,
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0.5, 0, 0.5, 0),
+                    Size = UDim2.new(0, 0, 0, 14),
+                    AutomaticSize = Enum.AutomaticSize.X,
+                    Font = Theme.FontRegular,
+                    Text = "  " .. tostring(opts.Text) .. "  ",
+                    TextColor3 = Theme.TextMuted,
+                    TextSize = 10,
+                    BorderSizePixel = 0,
+                    Parent = holder
+                })
+                return badge
+            end
+            return holder
+        end
+
+        -- [3] Label: Teks satu baris dengan dukungan Roblox Icon Asset ID
+        function TabPrototype:AddLabel(opts)
+            opts = type(opts) == "string" and { Text = opts } or (opts or {})
+            local card = Dom.CreateCard(self.Container, 28)
+            local _, lbl, ic = Dom.CreateHeaderRow(card, opts.Text or "Label", opts.Icon or "info", 0)
+            lbl.TextColor3 = opts.Color or Theme.TextSecondary
+            return {
+                SetText = function(_, t) lbl.Text = tostring(t) end,
+                SetIcon = function(_, id) if ic then ic.Image = AssetResolver.Format(id) or "" end end
+            }
+        end
+
+        -- [4] Paragraph: Teks multi-baris untuk deskripsi / panduan
+        function TabPrototype:AddParagraph(opts)
+            opts = opts or {}
+            local card = Dom.CreateCard(self.Container, 44)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 3),
+                Parent = card
+            })
+            local _, titleLbl = Dom.CreateHeaderRow(card, opts.Title or "Information", opts.Icon or "info", 0)
+            titleLbl.Font = Theme.FontBold
+            local body = Dom.Create("TextLabel", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Font = Theme.FontRegular,
+                Text = opts.Content or "",
+                TextColor3 = Theme.TextSecondary,
+                TextSize = 11,
+                TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+            return {
+                SetTitle = function(_, t) titleLbl.Text = tostring(t) end,
+                SetContent = function(_, c) body.Text = tostring(c) end
+            }
+        end
+
+        -- [5] Badge / Status Pill: Indikator status berwarna dengan titik Frame bulat & Icon Asset ID
+        function TabPrototype:AddBadge(opts)
+            opts = opts or {}
+            local card = Dom.CreateCard(self.Container, 30)
+            Dom.CreateHeaderRow(card, opts.Title or "Status", opts.Icon or "shield", 85)
+
+            local pill = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 0, 0, 18),
+                AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundColor3 = Theme.BgTertiary,
+                Parent = card
+            })
+            Dom.Corner(pill, 9)
+            Dom.Padding(pill, 2, 2, 7, 7)
+
+            Dom.Create("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = pill
+            })
+
+            local statusColor = opts.Color or Theme.Success
+            local dot = Dom.Create("Frame", {
+                LayoutOrder = 1,
+                Size = UDim2.new(0, 6, 0, 6),
+                BackgroundColor3 = statusColor,
+                BorderSizePixel = 0,
+                Parent = pill
+            })
+            Dom.Corner(dot, 3)
+
+            local txt = Dom.Create("TextLabel", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 0, 1, 0),
+                AutomaticSize = Enum.AutomaticSize.X,
+                Font = Theme.FontBold,
+                Text = tostring(opts.Status or "ONLINE"),
+                TextColor3 = statusColor,
+                TextSize = 10,
+                Parent = pill
+            })
+            return {
+                SetStatus = function(_, newStatus, newColor)
+                    txt.Text = tostring(newStatus)
+                    if newColor then
+                        txt.TextColor3 = newColor
+                        dot.BackgroundColor3 = newColor
+                    end
+                end
+            }
+        end
+
+        -- [6] Button: Tombol klik standar dengan Icon Chevron Roblox Asset ID di sisi kanan
+        function TabPrototype:AddButton(opts)
+            opts = opts or {}
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.CreateHeaderRow(card, opts.Title or "Button", opts.Icon or "bolt", 24)
+
+            Dom.Create("ImageLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 14, 0, 14),
+                Image = AssetResolver.Format("chevronright"),
+                ImageColor3 = Theme.AccentBright,
+                Parent = card
+            })
+
+            local hit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = card
+            })
+
+            self.Janitor:Connect(hit.MouseButton1Click, function()
+                Dom.Tween(card, 0.1, { BackgroundColor3 = Theme.AccentSoft })
+                task.delay(0.12, function()
+                    if card and card.Parent then
+                        Dom.Tween(card, 0.18, { BackgroundColor3 = Theme.BgSecondary })
+                    end
+                end)
+                if opts.Callback then task.spawn(opts.Callback) end
+            end)
+        end
+
+        -- [7] DoubleButton: 2 Tombol berdampingan dalam satu baris (mendukung LeftIcon & RightIcon)
+        function TabPrototype:AddDoubleButton(opts)
+            opts = opts or {}
+            local row = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 30),
+                Parent = self.Container
+            })
+            local function makeHalf(posScale, title, iconId, color, cb)
+                local btn = Dom.Create("TextButton", {
+                    BackgroundColor3 = color or Theme.BgSecondary,
+                    Position = UDim2.new(posScale, posScale > 0 and 3 or 0, 0, 0),
+                    Size = UDim2.new(0.5, -3, 1, 0),
+                    Text = "",
+                    AutoButtonColor = false,
+                    Parent = row
+                })
+                Dom.Corner(btn, 6)
+                Dom.Stroke(btn, Theme.Stroke, 1)
+
+                local content = Dom.Create("Frame", {
+                    BackgroundTransparency = 1,
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0.5, 0, 0.5, 0),
+                    Size = UDim2.new(0, 0, 1, 0),
+                    AutomaticSize = Enum.AutomaticSize.X,
+                    Parent = btn
+                })
+                Dom.Create("UIListLayout", {
+                    FillDirection = Enum.FillDirection.Horizontal,
+                    VerticalAlignment = Enum.VerticalAlignment.Center,
+                    Padding = UDim.new(0, 5),
+                    Parent = content
+                })
+                local resIcon = AssetResolver.Format(iconId)
+                if resIcon then
+                    Dom.Create("ImageLabel", {
+                        BackgroundTransparency = 1,
+                        Image = resIcon,
+                        ImageColor3 = Theme.AccentBright,
+                        Size = UDim2.new(0, 13, 0, 13),
+                        Parent = content
+                    })
+                end
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(0, 0, 1, 0),
+                    AutomaticSize = Enum.AutomaticSize.X,
+                    Font = Theme.FontBold,
+                    Text = title or "Action",
+                    TextColor3 = Theme.TextPrimary,
+                    TextSize = 11,
+                    Parent = content
+                })
+
+                self.Janitor:Connect(btn.MouseButton1Click, function()
+                    Dom.Tween(btn, 0.1, { BackgroundColor3 = Theme.Accent })
+                    task.delay(0.12, function()
+                        if btn and btn.Parent then
+                            Dom.Tween(btn, 0.18, { BackgroundColor3 = color or Theme.BgSecondary })
+                        end
+                    end)
+                    if cb then task.spawn(cb) end
+                end)
+            end
+            makeHalf(0, opts.LeftText or "Confirm", opts.LeftIcon or "check", opts.LeftColor, opts.LeftCallback)
+            makeHalf(0.5, opts.RightText or "Reset", opts.RightIcon or "refresh", opts.RightColor, opts.RightCallback)
+        end
+
+        -- [8] HoldButton: Tombol tahan selama durasi tertentu
+        function TabPrototype:AddHoldButton(opts)
+            opts = opts or {}
+            local holdTime = opts.HoldTime or 1.2
+            local card = Dom.CreateCard(self.Container, 34)
+            card.ClipsDescendants = true
+
+            local fill = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.AccentSoft,
+                BackgroundTransparency = 0.4,
+                Position = UDim2.new(0, -9, 0, -7),
+                Size = UDim2.new(0, 0, 1, 14),
+                BorderSizePixel = 0,
+                Parent = card
+            })
+
+            local _, lbl = Dom.CreateHeaderRow(card, (opts.Title or "Hold Action") .. " (" .. holdTime .. "s)", opts.Icon or "clock", 0)
+            local hit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = card
+            })
+
+            local holding = false
+            local activeTween = nil
+
+            self.Janitor:Connect(hit.MouseButton1Down, function()
+                holding = true
+                activeTween = Dom.Tween(fill, holdTime, { Size = UDim2.new(1, 18, 1, 14) }, Enum.EasingStyle.Linear)
+                task.delay(holdTime, function()
+                    if holding and not self.Janitor.IsDestroyed then
+                        holding = false
+                        fill.Size = UDim2.new(0, 0, 1, 14)
+                        if opts.Callback then task.spawn(opts.Callback) end
+                    end
+                end)
+            end)
+
+            local function cancelHold()
+                if holding then
+                    holding = false
+                    if activeTween then activeTween:Cancel() end
+                    Dom.Tween(fill, 0.15, { Size = UDim2.new(0, 0, 1, 14) })
+                end
+            end
+
+            self.Janitor:Connect(hit.MouseButton1Up, cancelHold)
+            self.Janitor:Connect(hit.MouseLeave, cancelHold)
+            return { SetTitle = function(_, t) lbl.Text = t end }
+        end
+
+        -- [9] Toggle (Checkbox Classic): Menggunakan Roblox Checkmark Icon Asset ID (Bukan Emoji)
+        function TabPrototype:AddToggle(opts)
+            opts = opts or {}
+            local state = opts.Default == true
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.CreateHeaderRow(card, opts.Title or "Toggle", opts.Icon or "check", 28)
+
+            local box = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 18, 0, 18),
+                BackgroundColor3 = state and Theme.Accent or Theme.BgTertiary,
+                Parent = card
+            })
+            Dom.Corner(box, 4)
+            local boxStroke = Dom.Stroke(box, state and Theme.AccentBright or Theme.Stroke, 1.2)
+
+            local checkIcon = Dom.Create("ImageLabel", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = state and UDim2.new(0, 13, 0, 13) or UDim2.new(0, 0, 0, 0),
+                BackgroundTransparency = 1,
+                Image = AssetResolver.Format("check"),
+                ImageColor3 = Theme.TextPrimary,
+                Parent = box
+            })
+
+            local hit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = card
+            })
+
+            local function set(val, silent)
+                state = val
+                boxStroke.Color = state and Theme.AccentBright or Theme.Stroke
+                Dom.Tween(box, 0.15, { BackgroundColor3 = state and Theme.Accent or Theme.BgTertiary })
+                Dom.Tween(checkIcon, 0.15, {
+                    Size = state and UDim2.new(0, 13, 0, 13) or UDim2.new(0, 0, 0, 0)
+                })
+                if not silent and opts.Callback then task.spawn(opts.Callback, state) end
+            end
+
+            self.Janitor:Connect(hit.MouseButton1Click, function() set(not state) end)
+            return { Set = set, Get = function() return state end }
+        end
+
+        -- [10] ToggleSwipe (Pill Switch): Saklar geser kapsul halus
+        function TabPrototype:AddToggleSwipe(opts)
+            opts = opts or {}
+            local state = opts.Default == true
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.CreateHeaderRow(card, opts.Title or "Toggle Swipe", opts.Icon or "bolt", 44)
+
+            local track = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 36, 0, 18),
+                BackgroundColor3 = state and Theme.Accent or Theme.BgTertiary,
+                Parent = card
+            })
+            Dom.Corner(track, 9)
+            Dom.Stroke(track, Theme.Stroke, 1)
+
+            local knob = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = state and UDim2.new(1, -16, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+                Size = UDim2.new(0, 14, 0, 14),
+                BackgroundColor3 = Theme.TextPrimary,
+                Parent = track
+            })
+            Dom.Corner(knob, 7)
+
+            local hit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = card
+            })
+
+            local function set(val, silent)
+                state = val
+                Dom.Tween(track, 0.18, { BackgroundColor3 = state and Theme.Accent or Theme.BgTertiary })
+                Dom.Tween(knob, 0.18, {
+                    Position = state and UDim2.new(1, -16, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+                })
+                if not silent and opts.Callback then task.spawn(opts.Callback, state) end
+            end
+
+            self.Janitor:Connect(hit.MouseButton1Click, function() set(not state) end)
+            return { Set = set, Get = function() return state end }
+        end
+
+        -- [11] Slider: Penggeser nilai tunggal dengan presisi desimal
+        function TabPrototype:AddSlider(opts)
+            opts = opts or {}
+            local min = opts.Min or 0
+            local max = opts.Max or 100
+            local step = opts.Step or 1
+            local suffix = opts.Suffix or ""
+            local val = math.clamp(opts.Default or min, min, max)
+
+            local card = Dom.CreateCard(self.Container, 46)
+            Dom.CreateHeaderRow(card, opts.Title or "Slider", opts.Icon or "gauge", 60)
+
+            local valLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 58, 0, 18),
+                Font = Theme.FontBold,
+                Text = tostring(val) .. suffix,
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+
+            local bar = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 24),
+                Size = UDim2.new(1, 0, 0, 6),
+                Parent = card
+            })
+            Dom.Corner(bar, 3)
+
+            local pct = (val - min) / math.max(max - min, 0.0001)
+            local fill = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.Accent,
+                Size = UDim2.new(pct, 0, 1, 0),
+                Parent = bar
+            })
+            Dom.Corner(fill, 3)
+
+            local dragging = false
+            local function updateFromX(xPos)
+                local rel = math.clamp((xPos - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+                local raw = min + (max - min) * rel
+                local snapped = math.floor((raw / step) + 0.5) * step
+                val = tonumber(string.format("%.2f", math.clamp(snapped, min, max)))
+                local newPct = (val - min) / math.max(max - min, 0.0001)
+                fill.Size = UDim2.new(newPct, 0, 1, 0)
+                valLbl.Text = tostring(val) .. suffix
+                if opts.Callback then task.spawn(opts.Callback, val) end
+            end
+
+            self.Janitor:Connect(bar.InputBegan, function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    updateFromX(input.Position.X)
+                end
+            end)
+            self.Janitor:Connect(UserInputService.InputChanged, function(input)
+                if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                    updateFromX(input.Position.X)
+                end
+            end)
+            self.Janitor:Connect(UserInputService.InputEnded, function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end)
+
+            return {
+                Set = function(_, newVal)
+                    val = math.clamp(newVal, min, max)
+                    fill.Size = UDim2.new((val - min) / math.max(max - min, 0.0001), 0, 1, 0)
+                    valLbl.Text = tostring(val) .. suffix
+                end,
+                Get = function() return val end
+            }
+        end
+
+        -- [12] RangeSlider: Penggeser 2 titik (Nilai Minimum & Maksimum)
+        function TabPrototype:AddRangeSlider(opts)
+            opts = opts or {}
+            local min = opts.Min or 0
+            local max = opts.Max or 100
+            local low = math.clamp(opts.DefaultMin or 20, min, max)
+            local high = math.clamp(opts.DefaultMax or 80, low, max)
+
+            local card = Dom.CreateCard(self.Container, 46)
+            Dom.CreateHeaderRow(card, opts.Title or "Range Slider", opts.Icon or "gauge", 75)
+
+            local valLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 72, 0, 18),
+                Font = Theme.FontBold,
+                Text = string.format("%d - %d", low, high),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+
+            local bar = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 24),
+                Size = UDim2.new(1, 0, 0, 6),
+                Parent = card
+            })
+            Dom.Corner(bar, 3)
+
+            local span = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.Accent,
+                Parent = bar
+            })
+            Dom.Corner(span, 3)
+
+            local function refreshVisual()
+                local p1 = (low - min) / math.max(max - min, 1)
+                local p2 = (high - min) / math.max(max - min, 1)
+                span.Position = UDim2.new(p1, 0, 0, 0)
+                span.Size = UDim2.new(math.max(p2 - p1, 0.02), 0, 1, 0)
+                valLbl.Text = string.format("%d - %d", low, high)
+            end
+            refreshVisual()
+
+            local activeHandle = nil
+            local function updateRange(xPos)
+                local rel = math.clamp((xPos - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+                local v = math.floor(min + (max - min) * rel + 0.5)
+                if activeHandle == "low" then
+                    low = math.min(v, high)
+                else
+                    high = math.max(v, low)
+                end
+                refreshVisual()
+                if opts.Callback then task.spawn(opts.Callback, low, high) end
+            end
+
+            self.Janitor:Connect(bar.InputBegan, function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    local rel = math.clamp((input.Position.X - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+                    local v = min + (max - min) * rel
+                    activeHandle = (math.abs(v - low) <= math.abs(v - high)) and "low" or "high"
+                    updateRange(input.Position.X)
+                end
+            end)
+            self.Janitor:Connect(UserInputService.InputChanged, function(input)
+                if activeHandle and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                    updateRange(input.Position.X)
+                end
+            end)
+            self.Janitor:Connect(UserInputService.InputEnded, function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                    activeHandle = nil
+                end
+            end)
+
+            return { Get = function() return low, high end }
+        end
+
+        -- [13] Stepper: Tombol Kurang [-] dan Tambah [+] presisi
+        function TabPrototype:AddStepper(opts)
+            opts = opts or {}
+            local min = opts.Min or 0
+            local max = opts.Max or 50
+            local step = opts.Step or 1
+            local val = math.clamp(opts.Default or 1, min, max)
+
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.CreateHeaderRow(card, opts.Title or "Stepper", opts.Icon or "settings", 86)
+
+            local ctrl = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 82, 0, 20),
+                BackgroundColor3 = Theme.BgTertiary,
+                Parent = card
+            })
+            Dom.Corner(ctrl, 4)
+
+            local btnMinus = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 22, 1, 0),
+                Font = Theme.FontBold,
+                Text = "-",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 13,
+                Parent = ctrl
+            })
+            local midLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 22, 0, 0),
+                Size = UDim2.new(1, -44, 1, 0),
+                Font = Theme.FontBold,
+                Text = tostring(val),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                Parent = ctrl
+            })
+            local btnPlus = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(1, -22, 0, 0),
+                Size = UDim2.new(0, 22, 1, 0),
+                Font = Theme.FontBold,
+                Text = "+",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 13,
+                Parent = ctrl
+            })
+
+            local function change(delta)
+                val = math.clamp(val + delta, min, max)
+                midLbl.Text = tostring(val)
+                if opts.Callback then task.spawn(opts.Callback, val) end
+            end
+
+            self.Janitor:Connect(btnMinus.MouseButton1Click, function() change(-step) end)
+            self.Janitor:Connect(btnPlus.MouseButton1Click, function() change(step) end)
+
+            return { Get = function() return val end }
+        end
+
+        -- [14] Dropdown (Single Select): Menggunakan Icon Chevron Roblox Asset ID (chevrondown/chevronup)
+        function TabPrototype:AddDropdown(opts)
+            opts = opts or {}
+            local list = opts.Options or { "Option A", "Option B" }
+            local selected = opts.Default or list[1]
+            local opened = false
+
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 18),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Dropdown", opts.Icon or "list", 104)
+
+            local selLabel = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -18, 0, 0),
+                Size = UDim2.new(0, 84, 1, 0),
+                Font = Theme.FontBold,
+                Text = tostring(selected),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                Parent = topRow
+            })
+
+            local chevronIcon = Dom.Create("ImageLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 14, 0, 14),
+                Image = AssetResolver.Format("chevrondown"),
+                ImageColor3 = Theme.AccentBright,
+                Parent = topRow
+            })
+
+            local topHit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = topRow
+            })
+
+            local optHolder = Dom.Create("Frame", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Visible = false,
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 3),
+                Parent = optHolder
+            })
+
+            local function rebuildItems()
+                for _, child in ipairs(optHolder:GetChildren()) do
+                    if child:IsA("TextButton") then child:Destroy() end
+                end
+                for _, item in ipairs(list) do
+                    local itemBtn = Dom.Create("TextButton", {
+                        BackgroundColor3 = Theme.BgTertiary,
+                        Size = UDim2.new(1, 0, 0, 22),
+                        Font = Theme.FontRegular,
+                        Text = "  " .. tostring(item),
+                        TextColor3 = Theme.TextSecondary,
+                        TextSize = 11,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        AutoButtonColor = false,
+                        Parent = optHolder
+                    })
+                    Dom.Corner(itemBtn, 4)
+                    self.Janitor:Connect(itemBtn.MouseButton1Click, function()
+                        selected = item
+                        selLabel.Text = tostring(selected)
+                        opened = false
+                        optHolder.Visible = false
+                        chevronIcon.Image = AssetResolver.Format("chevrondown")
+                        if opts.Callback then task.spawn(opts.Callback, selected) end
+                    end)
+                end
+            end
+            rebuildItems()
+
+            self.Janitor:Connect(topHit.MouseButton1Click, function()
+                opened = not opened
+                optHolder.Visible = opened
+                chevronIcon.Image = AssetResolver.Format(opened and "chevronup" or "chevrondown")
+            end)
+
+            return {
+                Get = function() return selected end,
+                SetOptions = function(_, newOpts)
+                    list = newOpts or {}
+                    selected = list[1] or "None"
+                    selLabel.Text = tostring(selected)
+                    rebuildItems()
+                end
+            }
+        end
+
+        -- [15] MultiDropdown: Menu pilihan ganda dengan Roblox Check Icon Asset ID
+        function TabPrototype:AddMultiDropdown(opts)
+            opts = opts or {}
+            local list = opts.Options or { "Item 1", "Item 2", "Item 3" }
+            local selectedMap = {}
+            for _, v in ipairs(opts.Default or {}) do selectedMap[v] = true end
+            local opened = false
+
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 18),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Multi Select", opts.Icon or "list", 104)
+
+            local selLabel = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, -18, 0, 0),
+                Size = UDim2.new(0, 84, 1, 0),
+                Font = Theme.FontBold,
+                Text = "0 Selected",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = topRow
+            })
+
+            local chevronIcon = Dom.Create("ImageLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 14, 0, 14),
+                Image = AssetResolver.Format("chevrondown"),
+                ImageColor3 = Theme.AccentBright,
+                Parent = topRow
+            })
+
+            local function getArray()
+                local arr = {}
+                for _, item in ipairs(list) do
+                    if selectedMap[item] then table.insert(arr, item) end
+                end
+                return arr
+            end
+
+            local function updateHeader()
+                local arr = getArray()
+                selLabel.Text = (#arr == 0 and "None" or (#arr .. " Selected"))
+                chevronIcon.Image = AssetResolver.Format(opened and "chevronup" or "chevrondown")
+            end
+            updateHeader()
+
+            local topHit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = topRow
+            })
+
+            local optHolder = Dom.Create("Frame", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Visible = false,
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 3),
+                Parent = optHolder
+            })
+
+            for _, item in ipairs(list) do
+                local itemBtn = Dom.Create("TextButton", {
+                    BackgroundColor3 = selectedMap[item] and Theme.AccentSoft or Theme.BgTertiary,
+                    Size = UDim2.new(1, 0, 0, 22),
+                    Text = "",
+                    AutoButtonColor = false,
+                    Parent = optHolder
+                })
+                Dom.Corner(itemBtn, 4)
+
+                local itemIcon = Dom.Create("ImageLabel", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 6, 0.5, 0),
+                    Size = UDim2.new(0, 12, 0, 12),
+                    BackgroundTransparency = 1,
+                    Image = AssetResolver.Format("check"),
+                    ImageTransparency = selectedMap[item] and 0 or 0.85,
+                    ImageColor3 = Theme.TextPrimary,
+                    Parent = itemBtn
+                })
+
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 24, 0, 0),
+                    Size = UDim2.new(1, -28, 1, 0),
+                    Font = Theme.FontRegular,
+                    Text = tostring(item),
+                    TextColor3 = Theme.TextPrimary,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = itemBtn
+                })
+
+                self.Janitor:Connect(itemBtn.MouseButton1Click, function()
+                    selectedMap[item] = not selectedMap[item]
+                    itemBtn.BackgroundColor3 = selectedMap[item] and Theme.AccentSoft or Theme.BgTertiary
+                    itemIcon.ImageTransparency = selectedMap[item] and 0 or 0.85
+                    updateHeader()
+                    if opts.Callback then task.spawn(opts.Callback, getArray()) end
+                end)
+            end
+
+            self.Janitor:Connect(topHit.MouseButton1Click, function()
+                opened = not opened
+                optHolder.Visible = opened
+                updateHeader()
+            end)
+
+            return { Get = getArray }
+        end
+
+        -- [16] SegmentedControl: Tab pilihan horizontal cepat
+        function TabPrototype:AddSegmentedControl(opts)
+            opts = opts or {}
+            local segments = opts.Options or { "Low", "Med", "High" }
+            local current = opts.Default or segments[1]
+
+            local card = Dom.CreateCard(self.Container, 50)
+            Dom.CreateHeaderRow(card, opts.Title or "Mode", opts.Icon or "layers", 0)
+
+            local bar = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 22),
+                Size = UDim2.new(1, 0, 0, 22),
+                Parent = card
+            })
+            Dom.Corner(bar, 5)
+
+            local buttons = {}
+            local count = math.max(#segments, 1)
+
+            local function selectSegment(val, silent)
+                current = val
+                for name, b in pairs(buttons) do
+                    local active = (name == current)
+                    Dom.Tween(b, 0.15, {
+                        BackgroundColor3 = active and Theme.Accent or Theme.BgTertiary,
+                        TextColor3 = active and Theme.TextPrimary or Theme.TextSecondary
+                    })
+                end
+                if not silent and opts.Callback then task.spawn(opts.Callback, current) end
+            end
+
+            for idx, seg in ipairs(segments) do
+                local b = Dom.Create("TextButton", {
+                    BackgroundColor3 = (seg == current) and Theme.Accent or Theme.BgTertiary,
+                    Position = UDim2.new((idx - 1) / count, 0, 0, 0),
+                    Size = UDim2.new(1 / count, 0, 1, 0),
+                    Font = Theme.FontBold,
+                    Text = tostring(seg),
+                    TextColor3 = (seg == current) and Theme.TextPrimary or Theme.TextSecondary,
+                    TextSize = 10,
+                    AutoButtonColor = false,
+                    Parent = bar
+                })
+                Dom.Corner(b, 5)
+                buttons[seg] = b
+                self.Janitor:Connect(b.MouseButton1Click, function()
+                    selectSegment(seg)
+                end)
+            end
+
+            return { Set = selectSegment, Get = function() return current end }
+        end
+
+        -- [17] RadioGroup: Pilihan eksklusif vertikal dengan titik Frame bulat
+        function TabPrototype:AddRadioGroup(opts)
+            opts = opts or {}
+            local options = opts.Options or { "Profile 1", "Profile 2" }
+            local chosen = opts.Default or options[1]
+
+            local card = Dom.CreateCard(self.Container, 36)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(card, opts.Title or "Radio Group", opts.Icon or "list", 0)
+
+            local dotMap = {}
+            for _, opt in ipairs(options) do
+                local row = Dom.Create("TextButton", {
+                    LayoutOrder = 2,
+                    BackgroundColor3 = Theme.BgTertiary,
+                    Size = UDim2.new(1, 0, 0, 22),
+                    Text = "",
+                    AutoButtonColor = false,
+                    Parent = card
+                })
+                Dom.Corner(row, 4)
+
+                local dot = Dom.Create("Frame", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 6, 0.5, 0),
+                    Size = UDim2.new(0, 10, 0, 10),
+                    BackgroundColor3 = (opt == chosen) and Theme.AccentBright or Theme.BgPrimary,
+                    Parent = row
+                })
+                Dom.Corner(dot, 5)
+                Dom.Stroke(dot, Theme.Stroke, 1)
+                dotMap[opt] = dot
+
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 22, 0, 0),
+                    Size = UDim2.new(1, -26, 1, 0),
+                    Font = Theme.FontRegular,
+                    Text = tostring(opt),
+                    TextColor3 = Theme.TextPrimary,
+                    TextSize = 11,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = row
+                })
+
+                self.Janitor:Connect(row.MouseButton1Click, function()
+                    chosen = opt
+                    for k, d in pairs(dotMap) do
+                        Dom.Tween(d, 0.14, { BackgroundColor3 = (k == chosen) and Theme.AccentBright or Theme.BgPrimary })
+                    end
+                    if opts.Callback then task.spawn(opts.Callback, chosen) end
+                end)
+            end
+
+            return { Get = function() return chosen end }
+        end
+
+        -- [18] TextInput: Kotak input teks satu baris
+        function TabPrototype:AddTextInput(opts)
+            opts = opts or {}
+            local card = Dom.CreateCard(self.Container, 34)
+            Dom.CreateHeaderRow(card, opts.Title or "Input", opts.Icon or "terminal", 108)
+
+            local box = Dom.Create("TextBox", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 102, 0, 20),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontRegular,
+                PlaceholderText = opts.Placeholder or "Type here...",
+                PlaceholderColor3 = Theme.TextMuted,
+                Text = opts.Default or "",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 11,
+                ClearTextOnFocus = opts.ClearOnFocus == true,
+                Parent = card
+            })
+            Dom.Corner(box, 4)
+            Dom.Stroke(box, Theme.Stroke, 1)
+
+            self.Janitor:Connect(box.FocusLost, function(enterPressed)
+                if opts.Callback then task.spawn(opts.Callback, box.Text, enterPressed) end
+            end)
+
+            return {
+                Set = function(_, t) box.Text = tostring(t) end,
+                Get = function() return box.Text end
+            }
+        end
+
+        -- [19] NumberInput: Kotak input khusus angka dengan auto-validasi
+        function TabPrototype:AddNumberInput(opts)
+            opts = opts or {}
+            local val = tonumber(opts.Default) or 0
+            local card = Dom.CreateCard(self.Container, 34)
+            Dom.CreateHeaderRow(card, opts.Title or "Number", opts.Icon or "gauge", 78)
+
+            local box = Dom.Create("TextBox", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 72, 0, 20),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontBold,
+                Text = tostring(val),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                ClearTextOnFocus = false,
+                Parent = card
+            })
+            Dom.Corner(box, 4)
+            Dom.Stroke(box, Theme.Stroke, 1)
+
+            self.Janitor:Connect(box.FocusLost, function()
+                local parsed = tonumber(box.Text)
+                if parsed then
+                    if opts.Min then parsed = math.max(parsed, opts.Min) end
+                    if opts.Max then parsed = math.min(parsed, opts.Max) end
+                    val = parsed
+                end
+                box.Text = tostring(val)
+                if opts.Callback then task.spawn(opts.Callback, val) end
+            end)
+
+            return { Get = function() return val end }
+        end
+
+        -- [20] SearchBar: Kotak pencarian real-time dengan Roblox Search Icon Asset ID
+        function TabPrototype:AddSearchBar(opts)
+            opts = opts or {}
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.CreateIcon(card, opts.Icon or "search", 14, Theme.AccentBright)
+
+            local box = Dom.Create("TextBox", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 22, 0, 0),
+                Size = UDim2.new(1, -22, 0, 18),
+                Font = Theme.FontRegular,
+                PlaceholderText = opts.Placeholder or "Search filter...",
+                PlaceholderColor3 = Theme.TextMuted,
+                Text = "",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ClearTextOnFocus = false,
+                Parent = card
+            })
+
+            self.Janitor:Connect(box:GetPropertyChangedSignal("Text"), function()
+                if opts.Callback then task.spawn(opts.Callback, box.Text) end
+            end)
+
+            return { Get = function() return box.Text end }
+        end
+
+        -- [21] Keybind: Pengatur tombol pintas keyboard
+        function TabPrototype:AddKeybind(opts)
+            opts = opts or {}
+            local currentKey = opts.Default or Enum.KeyCode.RightShift
+            local listening = false
+
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.CreateHeaderRow(card, opts.Title or "Keybind", opts.Icon or "settings", 76)
+
+            local bindBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 70, 0, 20),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontBold,
+                Text = "[" .. currentKey.Name .. "]",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                AutoButtonColor = false,
+                Parent = card
+            })
+            Dom.Corner(bindBtn, 4)
+            Dom.Stroke(bindBtn, Theme.Stroke, 1)
+
+            self.Janitor:Connect(bindBtn.MouseButton1Click, function()
+                listening = true
+                bindBtn.Text = "[ ... ]"
+            end)
+
+            self.Janitor:Connect(UserInputService.InputBegan, function(input, gpe)
+                if listening then
+                    if input.UserInputType == Enum.UserInputType.Keyboard then
+                        currentKey = input.KeyCode
+                        listening = false
+                        bindBtn.Text = "[" .. currentKey.Name .. "]"
+                        if opts.OnChanged then task.spawn(opts.OnChanged, currentKey) end
+                    end
+                elseif not gpe and input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == currentKey then
+                    if opts.Callback then task.spawn(opts.Callback, currentKey) end
+                end
+            end)
+
+            return { Get = function() return currentKey end }
+        end
+
+        -- [22] ColorPicker: Pemilih warna HSV interaktif & kompak
+        function TabPrototype:AddColorPicker(opts)
+            opts = opts or {}
+            local color = opts.Default or Theme.Accent
+            local h, s, v = color:ToHSV()
+            local opened = false
+
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 6),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 18),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Color Picker", opts.Icon or "star", 40)
+
+            local preview = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 32, 0, 16),
+                BackgroundColor3 = color,
+                Text = "",
+                AutoButtonColor = false,
+                Parent = topRow
+            })
+            Dom.Corner(preview, 4)
+            Dom.Stroke(preview, Theme.WhiteStroke, 1)
+
+            local drawer = Dom.Create("Frame", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 38),
+                Visible = false,
+                Parent = card
+            })
+
+            local function makeMiniBar(yPos, labelTxt, initPct, onDrag)
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 0, 0, yPos),
+                    Size = UDim2.new(0, 28, 0, 14),
+                    Font = Theme.FontRegular,
+                    Text = labelTxt,
+                    TextColor3 = Theme.TextSecondary,
+                    TextSize = 10,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = drawer
+                })
+                local bar = Dom.Create("Frame", {
+                    BackgroundColor3 = Theme.BgTertiary,
+                    Position = UDim2.new(0, 32, 0, yPos + 4),
+                    Size = UDim2.new(1, -32, 0, 6),
+                    Parent = drawer
+                })
+                Dom.Corner(bar, 3)
+                local fill = Dom.Create("Frame", {
+                    BackgroundColor3 = Theme.Accent,
+                    Size = UDim2.new(initPct, 0, 1, 0),
+                    Parent = bar
+                })
+                Dom.Corner(fill, 3)
+
+                local drag = false
+                local function move(x)
+                    local r = math.clamp((x - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1), 0, 1)
+                    fill.Size = UDim2.new(r, 0, 1, 0)
+                    onDrag(r)
+                end
+                self.Janitor:Connect(bar.InputBegan, function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                        drag = true; move(inp.Position.X)
+                    end
+                end)
+                self.Janitor:Connect(UserInputService.InputChanged, function(inp)
+                    if drag and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+                        move(inp.Position.X)
+                    end
+                end)
+                self.Janitor:Connect(UserInputService.InputEnded, function(inp)
+                    if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                        drag = false
+                    end
+                end)
+            end
+
+            local function applyHSV()
+                color = Color3.fromHSV(h, s, v)
+                preview.BackgroundColor3 = color
+                if opts.Callback then task.spawn(opts.Callback, color) end
+            end
+
+            makeMiniBar(0, "Hue", h, function(r) h = r; applyHSV() end)
+            makeMiniBar(20, "Sat", s, function(r) s = r; applyHSV() end)
+
+            self.Janitor:Connect(preview.MouseButton1Click, function()
+                opened = not opened
+                drawer.Visible = opened
+            end)
+
+            return {
+                Set = function(_, c) color = c; preview.BackgroundColor3 = c end,
+                Get = function() return color end
+            }
+        end
+
+        -- [23] ProgressBar: Bar indikator progres / persentase dinamis
+        function TabPrototype:AddProgressBar(opts)
+            opts = opts or {}
+            local pct = math.clamp(opts.Default or 50, 0, 100)
+            local card = Dom.CreateCard(self.Container, 44)
+            Dom.CreateHeaderRow(card, opts.Title or "Progress", opts.Icon or "gauge", 48)
+
+            local pctLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 44, 0, 18),
+                Font = Theme.FontBold,
+                Text = tostring(pct) .. "%",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+
+            local track = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 23),
+                Size = UDim2.new(1, 0, 0, 6),
+                Parent = card
+            })
+            Dom.Corner(track, 3)
+
+            local fill = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.Accent,
+                Size = UDim2.new(pct / 100, 0, 1, 0),
+                Parent = track
+            })
+            Dom.Corner(fill, 3)
+
+            return {
+                Set = function(_, newPct)
+                    pct = math.clamp(math.floor(newPct + 0.5), 0, 100)
+                    pctLbl.Text = tostring(pct) .. "%"
+                    Dom.Tween(fill, 0.2, { Size = UDim2.new(pct / 100, 0, 1, 0) })
+                end,
+                Get = function() return pct end
+            }
+        end
+
+        -- [24] Accordion / Spoiler: Kartu lipat dengan Roblox Chevron Icon Asset ID
+        function TabPrototype:AddAccordion(opts)
+            opts = opts or {}
+            local opened = opts.DefaultOpen == true
+            local card = Dom.CreateCard(self.Container, 32)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = card
+            })
+
+            local top = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 18),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(top, opts.Title or "Details", opts.Icon or "info", 24)
+
+            local arrowIcon = Dom.Create("ImageLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 14, 0, 14),
+                Image = AssetResolver.Format(opened and "chevronup" or "chevrondown"),
+                ImageColor3 = Theme.AccentBright,
+                Parent = top
+            })
+
+            local body = Dom.Create("TextLabel", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Font = Theme.FontRegular,
+                Text = opts.Content or "Hidden details inside accordion.",
+                TextColor3 = Theme.TextSecondary,
+                TextSize = 11,
+                TextWrapped = true,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Visible = opened,
+                Parent = card
+            })
+
+            local hit = Dom.Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 1, 0),
+                Text = "",
+                Parent = top
+            })
+
+            self.Janitor:Connect(hit.MouseButton1Click, function()
+                opened = not opened
+                body.Visible = opened
+                arrowIcon.Image = AssetResolver.Format(opened and "chevronup" or "chevrondown")
+            end)
+
+            return { SetContent = function(_, t) body.Text = tostring(t) end }
+        end
+
+        -- [25] StatCard: Kartu metrik nilai real-time dengan icon Roblox Asset ID
+        function TabPrototype:AddStatCard(opts)
+            opts = opts or {}
+            local card = Dom.CreateCard(self.Container, 42)
+
+            local iconBg = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 0, 0.5, 0),
+                Size = UDim2.new(0, 28, 0, 28),
+                BackgroundColor3 = Theme.BgTertiary,
+                Parent = card
+            })
+            Dom.Corner(iconBg, 6)
+
+            local resolved = AssetResolver.Format(opts.Icon or "star")
+            if resolved then
+                Dom.Create("ImageLabel", {
+                    AnchorPoint = Vector2.new(0.5, 0.5),
+                    Position = UDim2.new(0.5, 0, 0.5, 0),
+                    Size = UDim2.new(0, 18, 0, 18),
+                    BackgroundTransparency = 1,
+                    Image = resolved,
+                    ImageColor3 = Theme.AccentBright,
+                    Parent = iconBg
+                })
+            end
+
+            local titleLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 36, 0, 0),
+                Size = UDim2.new(1, -36, 0, 14),
+                Font = Theme.FontRegular,
+                Text = opts.Title or "Metric Stat",
+                TextColor3 = Theme.TextSecondary,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+
+            local valLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 36, 0, 14),
+                Size = UDim2.new(1, -36, 0, 16),
+                Font = Theme.FontBold,
+                Text = tostring(opts.Value or "0"),
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 13,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+
+            return {
+                SetValue = function(_, v) valLbl.Text = tostring(v) end,
+                SetTitle = function(_, t) titleLbl.Text = tostring(t) end
+            }
+        end
+
+        -- [26] CoordinateDisplay: Panel pembacaan koordinat X, Y, Z + Tombol Copy ber-icon
+        function TabPrototype:AddCoordinateDisplay(opts)
+            opts = opts or {}
+            local currentVec = opts.Default or Vector3.new(0, 0, 0)
+            local card = Dom.CreateCard(self.Container, 54)
+
+            Dom.CreateHeaderRow(card, opts.Title or "Live Coordinates", opts.Icon or "compass", 62)
+
+            local grabBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 58, 0, 18),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontBold,
+                Text = opts.ButtonText or "COPY",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                AutoButtonColor = false,
+                Parent = card
+            })
+            Dom.Corner(grabBtn, 4)
+            Dom.Stroke(grabBtn, Theme.Stroke, 1)
+
+            local coordBox = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 22),
+                Size = UDim2.new(1, 0, 0, 20),
+                Parent = card
+            })
+            Dom.Corner(coordBox, 4)
+
+            local coordLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, -10, 1, 0),
+                Position = UDim2.new(0, 5, 0, 0),
+                Font = Theme.FontMono,
+                Text = string.format("X: %.1f | Y: %.1f | Z: %.1f", currentVec.X, currentVec.Y, currentVec.Z),
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                Parent = coordBox
+            })
+
+            local function setVector(vec)
+                if typeof(vec) == "Vector3" then
+                    currentVec = vec
+                    coordLbl.Text = string.format("X: %.1f | Y: %.1f | Z: %.1f", vec.X, vec.Y, vec.Z)
+                end
+            end
+
+            self.Janitor:Connect(grabBtn.MouseButton1Click, function()
+                if setclipboard then
+                    pcall(setclipboard, string.format("%.1f, %.1f, %.1f", currentVec.X, currentVec.Y, currentVec.Z))
+                end
+                if opts.OnGrab then task.spawn(opts.OnGrab, currentVec) end
+            end)
+
+            return {
+                SetVector = function(_, v) setVector(v) end,
+                GetVector = function() return currentVec end
+            }
+        end
+
+        -- [27] PlayerSelector: Pemilih pemain aktif di server + Tombol Refresh ber-icon
+        function TabPrototype:AddPlayerSelector(opts)
+            opts = opts or {}
+            local selectedPlayerName = nil
+            local opened = false
+
+            local card = Dom.CreateCard(self.Container, 34)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 20),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Select Player", opts.Icon or "user", 112)
+
+            local refBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 24, 0, 18),
+                BackgroundColor3 = Theme.BgTertiary,
+                Text = "",
+                AutoButtonColor = false,
+                Parent = topRow
+            })
+            Dom.Corner(refBtn, 4)
+            Dom.Stroke(refBtn, Theme.Stroke, 1)
+            Dom.Create("ImageLabel", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 12, 0, 12),
+                BackgroundTransparency = 1,
+                Image = AssetResolver.Format("refresh"),
+                ImageColor3 = Theme.AccentBright,
+                Parent = refBtn
+            })
+
+            local selBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -28, 0.5, 0),
+                Size = UDim2.new(0, 80, 0, 18),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontBold,
+                Text = "None",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 10,
+                TextTruncate = Enum.TextTruncate.AtEnd,
+                AutoButtonColor = false,
+                Parent = topRow
+            })
+            Dom.Corner(selBtn, 4)
+            Dom.Stroke(selBtn, Theme.Stroke, 1)
+
+            local listHolder = Dom.Create("Frame", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Visible = false,
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 3),
+                Parent = listHolder
+            })
+
+            local function refreshList()
+                for _, c in ipairs(listHolder:GetChildren()) do
+                    if c:IsA("TextButton") then c:Destroy() end
+                end
+                local all = Players:GetPlayers()
+                for _, plr in ipairs(all) do
+                    if not opts.ExcludeSelf or plr ~= Players.LocalPlayer then
+                        local b = Dom.Create("TextButton", {
+                            BackgroundColor3 = Theme.BgTertiary,
+                            Size = UDim2.new(1, 0, 0, 20),
+                            Font = Theme.FontRegular,
+                            Text = "  " .. plr.Name,
+                            TextColor3 = Theme.TextSecondary,
+                            TextSize = 11,
+                            TextXAlignment = Enum.TextXAlignment.Left,
+                            AutoButtonColor = false,
+                            Parent = listHolder
+                        })
+                        Dom.Corner(b, 4)
+                        self.Janitor:Connect(b.MouseButton1Click, function()
+                            selectedPlayerName = plr.Name
+                            selBtn.Text = plr.Name
+                            opened = false
+                            listHolder.Visible = false
+                            if opts.Callback then task.spawn(opts.Callback, plr, plr.Name) end
+                        end)
+                    end
+                end
+            end
+
+            refreshList()
+
+            self.Janitor:Connect(refBtn.MouseButton1Click, function()
+                refreshList()
+            end)
+
+            self.Janitor:Connect(selBtn.MouseButton1Click, function()
+                opened = not opened
+                if opened then refreshList() end
+                listHolder.Visible = opened
+            end)
+
+            return {
+                Refresh = refreshList,
+                GetSelectedName = function() return selectedPlayerName end,
+                GetSelectedPlayer = function()
+                    return selectedPlayerName and Players:FindFirstChild(selectedPlayerName) or nil
+                end
+            }
+        end
+
+        -- [28] WaypointList: Daftar lokasi tersimpan dinamis dengan tombol TP & Trash Icon
+        function TabPrototype:AddWaypointList(opts)
+            opts = opts or {}
+            local waypoints = {}
+
+            local card = Dom.CreateCard(self.Container, 38)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 18),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Saved Waypoints", opts.Icon or "pin", 50)
+
+            local countLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 46, 1, 0),
+                Font = Theme.FontBold,
+                Text = "0 Saved",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = topRow
+            })
+
+            local itemsHolder = Dom.Create("Frame", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 0),
+                AutomaticSize = Enum.AutomaticSize.Y,
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = itemsHolder
+            })
+
+            local api = {}
+
+            local function renderWaypoints()
+                for _, child in ipairs(itemsHolder:GetChildren()) do
+                    if child:IsA("Frame") then child:Destroy() end
+                end
+                countLbl.Text = tostring(#waypoints) .. " Saved"
+
+                if #waypoints == 0 then
+                    local emptyRow = Dom.Create("Frame", {
+                        BackgroundColor3 = Theme.BgTertiary,
+                        Size = UDim2.new(1, 0, 0, 22),
+                        Parent = itemsHolder
+                    })
+                    Dom.Corner(emptyRow, 4)
+                    Dom.Create("TextLabel", {
+                        BackgroundTransparency = 1,
+                        Size = UDim2.new(1, 0, 1, 0),
+                        Font = Theme.FontRegular,
+                        Text = "Belum ada waypoint tersimpan",
+                        TextColor3 = Theme.TextMuted,
+                        TextSize = 10,
+                        Parent = emptyRow
+                    })
+                    return
+                end
+
+                for idx, wp in ipairs(waypoints) do
+                    local row = Dom.Create("Frame", {
+                        BackgroundColor3 = Theme.BgTertiary,
+                        Size = UDim2.new(1, 0, 0, 24),
+                        Parent = itemsHolder
+                    })
+                    Dom.Corner(row, 4)
+
+                    Dom.CreateIcon(row, "pin", 12, Theme.AccentBright).Position = UDim2.new(0, 6, 0.5, 0)
+
+                    Dom.Create("TextLabel", {
+                        BackgroundTransparency = 1,
+                        Position = UDim2.new(0, 22, 0, 0),
+                        Size = UDim2.new(1, -86, 1, 0),
+                        Font = Theme.FontMain,
+                        Text = wp.Name,
+                        TextColor3 = Theme.TextPrimary,
+                        TextSize = 11,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        TextTruncate = Enum.TextTruncate.AtEnd,
+                        Parent = row
+                    })
+
+                    local tpBtn = Dom.Create("TextButton", {
+                        AnchorPoint = Vector2.new(1, 0.5),
+                        Position = UDim2.new(1, -28, 0.5, 0),
+                        Size = UDim2.new(0, 32, 0, 18),
+                        BackgroundColor3 = Theme.Accent,
+                        Font = Theme.FontBold,
+                        Text = "TP",
+                        TextColor3 = Theme.TextPrimary,
+                        TextSize = 10,
+                        AutoButtonColor = false,
+                        Parent = row
+                    })
+                    Dom.Corner(tpBtn, 4)
+
+                    local delBtn = Dom.Create("TextButton", {
+                        AnchorPoint = Vector2.new(1, 0.5),
+                        Position = UDim2.new(1, -4, 0.5, 0),
+                        Size = UDim2.new(0, 20, 0, 18),
+                        BackgroundColor3 = Theme.Danger,
+                        Text = "",
+                        AutoButtonColor = false,
+                        Parent = row
+                    })
+                    Dom.Corner(delBtn, 4)
+                    Dom.Create("ImageLabel", {
+                        AnchorPoint = Vector2.new(0.5, 0.5),
+                        Position = UDim2.new(0.5, 0, 0.5, 0),
+                        Size = UDim2.new(0, 11, 0, 11),
+                        BackgroundTransparency = 1,
+                        Image = AssetResolver.Format("trash"),
+                        ImageColor3 = Theme.TextPrimary,
+                        Parent = delBtn
+                    })
+
+                    self.Janitor:Connect(tpBtn.MouseButton1Click, function()
+                        if opts.OnTeleport then task.spawn(opts.OnTeleport, wp.Name, wp.Position) end
+                    end)
+
+                    self.Janitor:Connect(delBtn.MouseButton1Click, function()
+                        table.remove(waypoints, idx)
+                        renderWaypoints()
+                        if opts.OnRemove then task.spawn(opts.OnRemove, wp.Name) end
+                    end)
+                end
+            end
+
+            function api:AddWaypoint(name, positionVec3)
+                for _, existing in ipairs(waypoints) do
+                    if existing.Name == name then
+                        existing.Position = positionVec3
+                        renderWaypoints()
+                        return
+                    end
+                end
+                table.insert(waypoints, { Name = tostring(name), Position = positionVec3 })
+                renderWaypoints()
+            end
+
+            function api:RemoveWaypoint(name)
+                for i = #waypoints, 1, -1 do
+                    if waypoints[i].Name == name then
+                        table.remove(waypoints, i)
+                    end
+                end
+                renderWaypoints()
+            end
+
+            function api:Clear()
+                table.clear(waypoints)
+                renderWaypoints()
+            end
+
+            function api:GetAll()
+                return waypoints
+            end
+
+            if opts.DefaultWaypoints then
+                for _, item in ipairs(opts.DefaultWaypoints) do
+                    table.insert(waypoints, { Name = item.Name, Position = item.Position })
+                end
+            end
+            renderWaypoints()
+
+            return api
+        end
+
+        -- [29] DialKnob: Kontrol putar/geser presisi (Degree / Offset)
+        function TabPrototype:AddDialKnob(opts)
+            opts = opts or {}
+            local min = opts.Min or 0
+            local max = opts.Max or 360
+            local val = math.clamp(opts.Default or 90, min, max)
+            local unit = opts.Unit or " deg"
+
+            local card = Dom.CreateCard(self.Container, 36)
+            Dom.CreateHeaderRow(card, opts.Title or "Dial Angle", opts.Icon or "compass", 96)
+
+            local dialFrame = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 90, 0, 22),
+                BackgroundColor3 = Theme.BgTertiary,
+                Parent = card
+            })
+            Dom.Corner(dialFrame, 11)
+            Dom.Stroke(dialFrame, Theme.Accent, 1)
+
+            local indicatorRing = Dom.Create("Frame", {
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 4, 0.5, 0),
+                Size = UDim2.new(0, 14, 0, 14),
+                BackgroundColor3 = Theme.BgPrimary,
+                Parent = dialFrame
+            })
+            Dom.Corner(indicatorRing, 7)
+            Dom.Stroke(indicatorRing, Theme.AccentBright, 1.5)
+
+            local valTxt = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 22, 0, 0),
+                Size = UDim2.new(1, -26, 1, 0),
+                Font = Theme.FontBold,
+                Text = tostring(val) .. unit,
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = dialFrame
+            })
+
+            local dragging = false
+            local function updateDial(xPos)
+                local rel = math.clamp((xPos - dialFrame.AbsolutePosition.X) / math.max(dialFrame.AbsoluteSize.X, 1), 0, 1)
+                val = math.floor(min + (max - min) * rel + 0.5)
+                valTxt.Text = tostring(val) .. unit
+                if opts.Callback then task.spawn(opts.Callback, val) end
+            end
+
+            self.Janitor:Connect(dialFrame.InputBegan, function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                    dragging = true
+                    updateDial(inp.Position.X)
+                end
+            end)
+            self.Janitor:Connect(UserInputService.InputChanged, function(inp)
+                if dragging and (inp.UserInputType == Enum.UserInputType.MouseMovement or inp.UserInputType == Enum.UserInputType.Touch) then
+                    updateDial(inp.Position.X)
+                end
+            end)
+            self.Janitor:Connect(UserInputService.InputEnded, function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+                    dragging = false
+                end
+            end)
+
+            return {
+                Set = function(_, v)
+                    val = math.clamp(v, min, max)
+                    valTxt.Text = tostring(val) .. unit
+                end,
+                Get = function() return val end
+            }
+        end
+
+        -- [30] MiniConsoleLog: Panel riwayat log aktivitas real-time di dalam UI
+        function TabPrototype:AddMiniConsoleLog(opts)
+            opts = opts or {}
+            local maxLines = opts.MaxLines or 25
+            local lines = {}
+
+            local card = Dom.CreateCard(self.Container, 86)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 18),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Console Output", opts.Icon or "terminal", 48)
+
+            local clrBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 44, 0, 16),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontBold,
+                Text = "CLEAR",
+                TextColor3 = Theme.TextSecondary,
+                TextSize = 9,
+                AutoButtonColor = false,
+                Parent = topRow
+            })
+            Dom.Corner(clrBtn, 4)
+
+            local logBox = Dom.Create("ScrollingFrame", {
+                LayoutOrder = 2,
+                BackgroundColor3 = Theme.BgPrimary,
+                Size = UDim2.new(1, 0, 0, opts.Height or 58),
+                CanvasSize = UDim2.new(0, 0, 0, 0),
+                AutomaticCanvasSize = Enum.AutomaticSize.Y,
+                ScrollBarThickness = 2,
+                ScrollBarImageColor3 = Theme.Accent,
+                BorderSizePixel = 0,
+                Parent = card
+            })
+            Dom.Corner(logBox, 4)
+            Dom.Stroke(logBox, Theme.Stroke, 1)
+            Dom.Padding(logBox, 4, 4, 6, 6)
+            local logList = Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 2),
+                Parent = logBox
+            })
+            Dom.BindAutoCanvas(logBox, logList, 8)
+
+            local function renderLogs()
+                for _, c in ipairs(logBox:GetChildren()) do
+                    if c:IsA("TextLabel") then c:Destroy() end
+                end
+                for idx, entry in ipairs(lines) do
+                    Dom.Create("TextLabel", {
+                        LayoutOrder = idx,
+                        BackgroundTransparency = 1,
+                        Size = UDim2.new(1, 0, 0, 0),
+                        AutomaticSize = Enum.AutomaticSize.Y,
+                        Font = Theme.FontMono,
+                        Text = entry.Text,
+                        TextColor3 = entry.Color or Theme.TextSecondary,
+                        TextSize = 10,
+                        TextWrapped = true,
+                        TextXAlignment = Enum.TextXAlignment.Left,
+                        Parent = logBox
+                    })
+                end
+                task.defer(function()
+                    if logBox and logBox.Parent then
+                        logBox.CanvasPosition = Vector2.new(0, 99999)
+                    end
+                end)
+            end
+
+            local api = {}
+            function api:Log(msg, color)
+                local timestamp = os.date("%H:%M:%S")
+                table.insert(lines, {
+                    Text = string.format("[%s] %s", timestamp, tostring(msg)),
+                    Color = color or Theme.TextSecondary
+                })
+                if #lines > maxLines then
+                    table.remove(lines, 1)
+                end
+                renderLogs()
+            end
+
+            function api:Clear()
+                table.clear(lines)
+                renderLogs()
+            end
+
+            self.Janitor:Connect(clrBtn.MouseButton1Click, function()
+                api:Clear()
+            end)
+
+            if opts.DefaultLogs then
+                for _, l in ipairs(opts.DefaultLogs) do
+                    api:Log(l)
+                end
+            else
+                api:Log("Console initialized.")
+            end
+
+            return api
+        end
+
+        -- ====================================================================
+        -- 10 KOMPONEN BARU UPDATE 1.2 (KOMPONEN #31 s/d #40)
+        -- ====================================================================
+
+        -- [31] AvatarCard: Kartu profil pemain dengan headshot rbxthumb + DisplayName & UserId
+        function TabPrototype:AddAvatarCard(opts)
+            opts = opts or {}
+            local lp = Players.LocalPlayer
+            local targetUserId = opts.UserId or (lp and lp.UserId) or 1
+            local targetName = opts.Username or (lp and lp.Name) or "Player"
+            local targetSub = opts.Subtitle or ("UserId: " .. tostring(targetUserId))
+
+            local card = Dom.CreateCard(self.Container, 48)
+
+            local avatarImg = Dom.Create("ImageLabel", {
+                AnchorPoint = Vector2.new(0, 0.5),
+                Position = UDim2.new(0, 0, 0.5, 0),
+                Size = UDim2.new(0, 34, 0, 34),
+                BackgroundColor3 = Theme.BgTertiary,
+                Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", targetUserId),
+                Parent = card
+            })
+            Dom.Corner(avatarImg, 17)
+            Dom.Stroke(avatarImg, Theme.Accent, 1.5)
+
+            local nameLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 42, 0, 2),
+                Size = UDim2.new(1, -46, 0, 16),
+                Font = Theme.FontBold,
+                Text = tostring(targetName),
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 12,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+
+            local subLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 42, 0, 18),
+                Size = UDim2.new(1, -46, 0, 14),
+                Font = Theme.FontRegular,
+                Text = tostring(targetSub),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+
+            return {
+                SetPlayer = function(_, plr)
+                    if plr then
+                        avatarImg.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", plr.UserId)
+                        nameLbl.Text = plr.Name
+                        subLbl.Text = "UserId: " .. tostring(plr.UserId)
+                    end
+                end
+            }
+        end
+
+        -- [32] KeyValueList: Tabel ringkas pasangan Key-Value (Statistik / Telemetri)
+        function TabPrototype:AddKeyValueList(opts)
+            opts = opts or {}
+            local data = opts.Items or { { Key = "Server Region", Value = "Asia" }, { Key = "Executor", Value = "Ready" } }
+
+            local card = Dom.CreateCard(self.Container, 40)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(card, opts.Title or "Telemetry Info", opts.Icon or "list", 0)
+
+            local valueLabels = {}
+            for idx, entry in ipairs(data) do
+                local k = entry.Key or ("Item " .. idx)
+                local v = entry.Value or "-"
+                local row = Dom.Create("Frame", {
+                    LayoutOrder = idx + 1,
+                    BackgroundColor3 = Theme.BgTertiary,
+                    Size = UDim2.new(1, 0, 0, 20),
+                    Parent = card
+                })
+                Dom.Corner(row, 4)
+
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 7, 0, 0),
+                    Size = UDim2.new(0.55, -7, 1, 0),
+                    Font = Theme.FontRegular,
+                    Text = tostring(k),
+                    TextColor3 = Theme.TextSecondary,
+                    TextSize = 10,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    Parent = row
+                })
+
+                local vLbl = Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0.55, 0, 0, 0),
+                    Size = UDim2.new(0.45, -7, 1, 0),
+                    Font = Theme.FontBold,
+                    Text = tostring(v),
+                    TextColor3 = Theme.AccentBright,
+                    TextSize = 10,
+                    TextXAlignment = Enum.TextXAlignment.Right,
+                    Parent = row
+                })
+                valueLabels[k] = vLbl
+            end
+
+            return {
+                SetValue = function(_, keyName, newVal)
+                    if valueLabels[keyName] then
+                        valueLabels[keyName].Text = tostring(newVal)
+                    end
+                end
+            }
+        end
+
+        -- [33] IconGridPicker: Pemilih opsi berbasis kotak grid icon Roblox Asset ID
+        function TabPrototype:AddIconGridPicker(opts)
+            opts = opts or {}
+            local items = opts.Items or {
+                { Name = "Home", Icon = "home" },
+                { Name = "Speed", Icon = "bolt" },
+                { Name = "Shield", Icon = "shield" },
+                { Name = "Target", Icon = "compass" }
+            }
+            local selectedName = opts.Default or (items[1] and items[1].Name)
+
+            local card = Dom.CreateCard(self.Container, 64)
+            Dom.CreateHeaderRow(card, opts.Title or "Icon Preset Picker", opts.Icon or "grid", 0)
+
+            local gridHolder = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 0, 0, 22),
+                Size = UDim2.new(1, 0, 0, 32),
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = gridHolder
+            })
+
+            local btnMap = {}
+            for _, item in ipairs(items) do
+                local cell = Dom.Create("TextButton", {
+                    BackgroundColor3 = (item.Name == selectedName) and Theme.Accent or Theme.BgTertiary,
+                    Size = UDim2.new(0, 56, 0, 30),
+                    Text = "",
+                    AutoButtonColor = false,
+                    Parent = gridHolder
+                })
+                Dom.Corner(cell, 5)
+                Dom.Stroke(cell, Theme.Stroke, 1)
+
+                local ic = Dom.Create("ImageLabel", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 5, 0.5, 0),
+                    Size = UDim2.new(0, 13, 0, 13),
+                    BackgroundTransparency = 1,
+                    Image = AssetResolver.Format(item.Icon or "star"),
+                    ImageColor3 = Theme.TextPrimary,
+                    Parent = cell
+                })
+
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 20, 0, 0),
+                    Size = UDim2.new(1, -22, 1, 0),
+                    Font = Theme.FontBold,
+                    Text = tostring(item.Name),
+                    TextColor3 = Theme.TextPrimary,
+                    TextSize = 9,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    Parent = cell
+                })
+
+                btnMap[item.Name] = cell
+                self.Janitor:Connect(cell.MouseButton1Click, function()
+                    selectedName = item.Name
+                    for k, b in pairs(btnMap) do
+                        Dom.Tween(b, 0.14, { BackgroundColor3 = (k == selectedName) and Theme.Accent or Theme.BgTertiary })
+                    end
+                    if opts.Callback then task.spawn(opts.Callback, selectedName) end
+                end)
+            end
+
+            return { Get = function() return selectedName end }
+        end
+
+        -- [34] StopwatchCard: Penghitung waktu sesi interaktif (Start / Pause / Reset) dengan Icon
+        function TabPrototype:AddStopwatchCard(opts)
+            opts = opts or {}
+            local running = opts.AutoStart == true
+            local elapsed = 0
+
+            local card = Dom.CreateCard(self.Container, 36)
+            Dom.CreateHeaderRow(card, opts.Title or "Session Timer", opts.Icon or "clock", 118)
+
+            local timeLbl = Dom.Create("TextLabel", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -56, 0.5, 0),
+                Size = UDim2.new(0, 58, 0, 18),
+                BackgroundTransparency = 1,
+                Font = Theme.FontMono,
+                Text = "00:00",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+
+            local toggleBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -26, 0.5, 0),
+                Size = UDim2.new(0, 24, 0, 18),
+                BackgroundColor3 = running and Theme.Accent or Theme.BgTertiary,
+                Text = "",
+                AutoButtonColor = false,
+                Parent = card
+            })
+            Dom.Corner(toggleBtn, 4)
+
+            local toggleIcon = Dom.Create("ImageLabel", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 11, 0, 11),
+                BackgroundTransparency = 1,
+                Image = AssetResolver.Format(running and "pause" or "play"),
+                ImageColor3 = Theme.TextPrimary,
+                Parent = toggleBtn
+            })
+
+            local rstBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 22, 0, 18),
+                BackgroundColor3 = Theme.BgTertiary,
+                Text = "",
+                AutoButtonColor = false,
+                Parent = card
+            })
+            Dom.Corner(rstBtn, 4)
+            Dom.Create("ImageLabel", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 11, 0, 11),
+                BackgroundTransparency = 1,
+                Image = AssetResolver.Format("refresh"),
+                ImageColor3 = Theme.TextSecondary,
+                Parent = rstBtn
+            })
+
+            local function formatSeconds(sec)
+                local m = math.floor(sec / 60)
+                local s = math.floor(sec % 60)
+                return string.format("%02d:%02d", m, s)
+            end
+
+            self.Janitor:SpawnLoop(1, function()
+                if running then
+                    elapsed = elapsed + 1
+                    timeLbl.Text = formatSeconds(elapsed)
+                end
+            end)
+
+            self.Janitor:Connect(toggleBtn.MouseButton1Click, function()
+                running = not running
+                toggleBtn.BackgroundColor3 = running and Theme.Accent or Theme.BgTertiary
+                toggleIcon.Image = AssetResolver.Format(running and "pause" or "play")
+            end)
+
+            self.Janitor:Connect(rstBtn.MouseButton1Click, function()
+                elapsed = 0
+                timeLbl.Text = "00:00"
+            end)
+
+            return { GetElapsed = function() return elapsed end }
+        end
+
+        -- [35] DualProgressBar: Bar progres ganda (Misal Health & Shield / Stamina & Mana)
+        function TabPrototype:AddDualProgressBar(opts)
+            opts = opts or {}
+            local p1 = math.clamp(opts.DefaultPrimary or 80, 0, 100)
+            local p2 = math.clamp(opts.DefaultSecondary or 50, 0, 100)
+
+            local card = Dom.CreateCard(self.Container, 54)
+            Dom.CreateHeaderRow(card, opts.Title or "Dual Status Bar", opts.Icon or "shield", 75)
+
+            local statusLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 72, 0, 18),
+                Font = Theme.FontBold,
+                Text = string.format("%d%% | %d%%", p1, p2),
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+
+            local bar1 = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 22),
+                Size = UDim2.new(1, 0, 0, 5),
+                Parent = card
+            })
+            Dom.Corner(bar1, 3)
+            local fill1 = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.Accent,
+                Size = UDim2.new(p1 / 100, 0, 1, 0),
+                Parent = bar1
+            })
+            Dom.Corner(fill1, 3)
+
+            local bar2 = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 31),
+                Size = UDim2.new(1, 0, 0, 5),
+                Parent = card
+            })
+            Dom.Corner(bar2, 3)
+            local fill2 = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.AccentBright,
+                Size = UDim2.new(p2 / 100, 0, 1, 0),
+                Parent = bar2
+            })
+            Dom.Corner(fill2, 3)
+
+            return {
+                Set = function(_, newP1, newP2)
+                    p1 = math.clamp(math.floor((newP1 or p1) + 0.5), 0, 100)
+                    p2 = math.clamp(math.floor((newP2 or p2) + 0.5), 0, 100)
+                    statusLbl.Text = string.format("%d%% | %d%%", p1, p2)
+                    Dom.Tween(fill1, 0.18, { Size = UDim2.new(p1 / 100, 0, 1, 0) })
+                    Dom.Tween(fill2, 0.18, { Size = UDim2.new(p2 / 100, 0, 1, 0) })
+                end
+            }
+        end
+
+        -- [36] DirectionPad: Panel tombol geser posisi mikro (Nudge X/Y/Z: Fwd, Back, Left, Right, Up, Down)
+        function TabPrototype:AddDirectionPad(opts)
+            opts = opts or {}
+            local stepStuds = opts.Step or 5
+            local card = Dom.CreateCard(self.Container, 58)
+            Dom.CreateHeaderRow(card, (opts.Title or "Micro Nudge Pad") .. " (" .. stepStuds .. " st)", opts.Icon or "move", 0)
+
+            local row = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 0, 0, 22),
+                Size = UDim2.new(1, 0, 0, 22),
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = row
+            })
+
+            local directions = {
+                { Label = "FWD", Vec = Vector3.new(0, 0, -stepStuds) },
+                { Label = "BCK", Vec = Vector3.new(0, 0, stepStuds) },
+                { Label = "LFT", Vec = Vector3.new(-stepStuds, 0, 0) },
+                { Label = "RGT", Vec = Vector3.new(stepStuds, 0, 0) },
+                { Label = "UP",  Vec = Vector3.new(0, stepStuds, 0) },
+                { Label = "DWN", Vec = Vector3.new(0, -stepStuds, 0) }
+            }
+
+            for _, d in ipairs(directions) do
+                local b = Dom.Create("TextButton", {
+                    BackgroundColor3 = Theme.BgTertiary,
+                    Size = UDim2.new(1 / 6, -3.5, 1, 0),
+                    Font = Theme.FontBold,
+                    Text = d.Label,
+                    TextColor3 = Theme.TextPrimary,
+                    TextSize = 9,
+                    AutoButtonColor = false,
+                    Parent = row
+                })
+                Dom.Corner(b, 4)
+                Dom.Stroke(b, Theme.Stroke, 1)
+                self.Janitor:Connect(b.MouseButton1Click, function()
+                    Dom.Tween(b, 0.1, { BackgroundColor3 = Theme.Accent })
+                    task.delay(0.12, function()
+                        if b and b.Parent then Dom.Tween(b, 0.15, { BackgroundColor3 = Theme.BgTertiary }) end
+                    end)
+                    if opts.Callback then task.spawn(opts.Callback, d.Vec, d.Label) end
+                end)
+            end
+        end
+
+        -- [37] TagListEditor: Daftar tag filter dinamis dengan tombol tambah & hapus
+        function TabPrototype:AddTagListEditor(opts)
+            opts = opts or {}
+            local tags = {}
+            for _, t in ipairs(opts.Default or { "VIP", "Boss" }) do
+                table.insert(tags, tostring(t))
+            end
+
+            local card = Dom.CreateCard(self.Container, 56)
+            Dom.Create("UIListLayout", {
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 5),
+                Parent = card
+            })
+
+            local topRow = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 20),
+                Parent = card
+            })
+            Dom.CreateHeaderRow(topRow, opts.Title or "Tag Filter", opts.Icon or "tag", 98)
+
+            local inputBox = Dom.Create("TextBox", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, -24, 0.5, 0),
+                Size = UDim2.new(0, 68, 0, 18),
+                BackgroundColor3 = Theme.BgTertiary,
+                Font = Theme.FontRegular,
+                PlaceholderText = "Add tag...",
+                PlaceholderColor3 = Theme.TextMuted,
+                Text = "",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 10,
+                Parent = topRow
+            })
+            Dom.Corner(inputBox, 4)
+
+            local addBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 20, 0, 18),
+                BackgroundColor3 = Theme.Accent,
+                Text = "",
+                AutoButtonColor = false,
+                Parent = topRow
+            })
+            Dom.Corner(addBtn, 4)
+            Dom.Create("ImageLabel", {
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 11, 0, 11),
+                BackgroundTransparency = 1,
+                Image = AssetResolver.Format("plus"),
+                ImageColor3 = Theme.TextPrimary,
+                Parent = addBtn
+            })
+
+            local tagHolder = Dom.Create("Frame", {
+                LayoutOrder = 2,
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 20),
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = tagHolder
+            })
+
+            local function renderTags()
+                for _, c in ipairs(tagHolder:GetChildren()) do
+                    if c:IsA("TextButton") then c:Destroy() end
+                end
+                for idx, tagTxt in ipairs(tags) do
+                    local chip = Dom.Create("TextButton", {
+                        BackgroundColor3 = Theme.BgTertiary,
+                        Size = UDim2.new(0, 0, 0, 18),
+                        AutomaticSize = Enum.AutomaticSize.X,
+                        Font = Theme.FontBold,
+                        Text = "  " .. tagTxt .. " [x]  ",
+                        TextColor3 = Theme.AccentBright,
+                        TextSize = 9,
+                        AutoButtonColor = false,
+                        Parent = tagHolder
+                    })
+                    Dom.Corner(chip, 9)
+                    Dom.Stroke(chip, Theme.Stroke, 1)
+                    self.Janitor:Connect(chip.MouseButton1Click, function()
+                        table.remove(tags, idx)
+                        renderTags()
+                        if opts.Callback then task.spawn(opts.Callback, tags) end
+                    end)
+                end
+            end
+            renderTags()
+
+            self.Janitor:Connect(addBtn.MouseButton1Click, function()
+                if inputBox.Text ~= "" then
+                    table.insert(tags, inputBox.Text)
+                    inputBox.Text = ""
+                    renderTags()
+                    if opts.Callback then task.spawn(opts.Callback, tags) end
+                end
+            end)
+
+            return { GetTags = function() return tags end }
+        end
+
+        -- [38] SpeedometerGauge: Indikator kecepatan / performa karakter real-time (studs/s)
+        function TabPrototype:AddSpeedometerGauge(opts)
+            opts = opts or {}
+            local maxSpeed = opts.MaxSpeed or 250
+            local card = Dom.CreateCard(self.Container, 44)
+            Dom.CreateHeaderRow(card, opts.Title or "Velocity Gauge", opts.Icon or "gauge", 68)
+
+            local spdLbl = Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                AnchorPoint = Vector2.new(1, 0),
+                Position = UDim2.new(1, 0, 0, 0),
+                Size = UDim2.new(0, 64, 0, 18),
+                Font = Theme.FontMono,
+                Text = "0 st/s",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Parent = card
+            })
+
+            local track = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.BgTertiary,
+                Position = UDim2.new(0, 0, 0, 23),
+                Size = UDim2.new(1, 0, 0, 6),
+                Parent = card
+            })
+            Dom.Corner(track, 3)
+
+            local fill = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.Accent,
+                Size = UDim2.new(0, 0, 1, 0),
+                Parent = track
+            })
+            Dom.Corner(fill, 3)
+
+            return {
+                SetSpeed = function(_, studsPerSec)
+                    local s = math.max(0, math.floor(studsPerSec + 0.5))
+                    spdLbl.Text = tostring(s) .. " st/s"
+                    local ratio = math.clamp(s / math.max(maxSpeed, 1), 0, 1)
+                    fill.Size = UDim2.new(ratio, 0, 1, 0)
+                end
+            }
+        end
+
+        -- [39] ActionBanner: Kartu sorotan pengumuman / tombol aksi prioritas beraksen
+        function TabPrototype:AddActionBanner(opts)
+            opts = opts or {}
+            local card = Dom.Create("Frame", {
+                BackgroundColor3 = Theme.AccentSoft,
+                Size = UDim2.new(1, 0, 0, 42),
+                BorderSizePixel = 0,
+                Parent = self.Container
+            })
+            Dom.Corner(card, 6)
+            Dom.Stroke(card, Theme.AccentBright, 1)
+            Dom.Padding(card, 6, 6, 9, 9)
+
+            Dom.CreateIcon(card, opts.Icon or "bolt", 16, Theme.TextPrimary)
+
+            Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 22, 0, 0),
+                Size = UDim2.new(1, -82, 0, 15),
+                Font = Theme.FontBold,
+                Text = opts.Title or "Quick Action Banner",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 11,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+
+            Dom.Create("TextLabel", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 22, 0, 15),
+                Size = UDim2.new(1, -82, 0, 13),
+                Font = Theme.FontRegular,
+                Text = opts.Subtitle or "Ready to execute",
+                TextColor3 = Theme.TextPrimary,
+                TextSize = 9,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Parent = card
+            })
+
+            local actBtn = Dom.Create("TextButton", {
+                AnchorPoint = Vector2.new(1, 0.5),
+                Position = UDim2.new(1, 0, 0.5, 0),
+                Size = UDim2.new(0, 54, 0, 22),
+                BackgroundColor3 = Theme.BgPrimary,
+                Font = Theme.FontBold,
+                Text = opts.ButtonText or "RUN",
+                TextColor3 = Theme.AccentBright,
+                TextSize = 10,
+                AutoButtonColor = false,
+                Parent = card
+            })
+            Dom.Corner(actBtn, 4)
+            Dom.Stroke(actBtn, Theme.WhiteStroke, 1)
+
+            self.Janitor:Connect(actBtn.MouseButton1Click, function()
+                if opts.Callback then task.spawn(opts.Callback) end
+            end)
+        end
+
+        -- [40] QuickSlotBar: Baris 4 slot tombol pintas bernomor dengan Icon Asset ID
+        function TabPrototype:AddQuickSlotBar(opts)
+            opts = opts or {}
+            local slots = opts.Slots or {
+                { Label = "Slot 1", Icon = "pin" },
+                { Label = "Slot 2", Icon = "bolt" },
+                { Label = "Slot 3", Icon = "shield" },
+                { Label = "Slot 4", Icon = "star" }
+            }
+
+            local card = Dom.CreateCard(self.Container, 54)
+            Dom.CreateHeaderRow(card, opts.Title or "Quick Slots", opts.Icon or "grid", 0)
+
+            local bar = Dom.Create("Frame", {
+                BackgroundTransparency = 1,
+                Position = UDim2.new(0, 0, 0, 22),
+                Size = UDim2.new(1, 0, 0, 24),
+                Parent = card
+            })
+            Dom.Create("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Padding = UDim.new(0, 4),
+                Parent = bar
+            })
+
+            local count = math.max(#slots, 1)
+            for idx, sl in ipairs(slots) do
+                local b = Dom.Create("TextButton", {
+                    BackgroundColor3 = Theme.BgTertiary,
+                    Size = UDim2.new(1 / count, -3.5, 1, 0),
+                    Text = "",
+                    AutoButtonColor = false,
+                    Parent = bar
+                })
+                Dom.Corner(b, 4)
+                Dom.Stroke(b, Theme.Stroke, 1)
+
+                Dom.Create("ImageLabel", {
+                    AnchorPoint = Vector2.new(0, 0.5),
+                    Position = UDim2.new(0, 5, 0.5, 0),
+                    Size = UDim2.new(0, 12, 0, 12),
+                    BackgroundTransparency = 1,
+                    Image = AssetResolver.Format(sl.Icon or "star"),
+                    ImageColor3 = Theme.AccentBright,
+                    Parent = b
+                })
+
+                Dom.Create("TextLabel", {
+                    BackgroundTransparency = 1,
+                    Position = UDim2.new(0, 20, 0, 0),
+                    Size = UDim2.new(1, -22, 1, 0),
+                    Font = Theme.FontBold,
+                    Text = tostring(sl.Label or ("S" .. idx)),
+                    TextColor3 = Theme.TextPrimary,
+                    TextSize = 9,
+                    TextXAlignment = Enum.TextXAlignment.Left,
+                    TextTruncate = Enum.TextTruncate.AtEnd,
+                    Parent = b
+                })
+
+                self.Janitor:Connect(b.MouseButton1Click, function()
+                    Dom.Tween(b, 0.1, { BackgroundColor3 = Theme.Accent })
+                    task.delay(0.12, function()
+                        if b and b.Parent then Dom.Tween(b, 0.15, { BackgroundColor3 = Theme.BgTertiary }) end
+                    end)
+                    if opts.Callback then task.spawn(opts.Callback, idx, sl.Label) end
+                end)
+            end
+        end
+
+    end
+
+    return Components
+end)
+
+-- ============================================================================
+-- MODULE 6: WindowManager (Header "Slientx" + Pembatas + Scrollable Features)
+-- ============================================================================
+RegisterModule("WindowManager", function(require)
+    local CoreGui = game:GetService("CoreGui")
+    local Players = game:GetService("Players")
+    local UserInputService = game:GetService("UserInputService")
+    local CleanupManager = require("CleanupManager")
+    local Theme = require("Theme")
+    local Dom = require("DomUtils")
+    local AssetResolver = require("AssetResolver")
+    local Components = require("Components")
+
+    local WindowManager = {}
+    WindowManager.__index = WindowManager
+
+    local TabPrototype = {}
+    TabPrototype.__index = TabPrototype
+    Components.Attach(TabPrototype)
+
+    -- Izinkan pemanggilan komponen langsung dari Window (Single-Scroll Mode di bawah header "Slientx")
+    -- sekaligus tetap mendukung pembuatan Tab (Window:AddTab)
+    for methodName, methodFn in pairs(TabPrototype) do
+        if type(methodFn) == "function" and methodName:find("^Add") then
+            WindowManager[methodName] = function(self, ...)
+                if not self.DefaultFeaturePage then
+                    self.DefaultFeaturePage = self:CreateFeatureScrollPage(true)
+                end
+                return methodFn(self.DefaultFeaturePage, ...)
+            end
+        end
+    end
+
+    local function GetSafeParent()
+        local ok, hui = pcall(function()
+            return gethui and gethui()
+        end)
+        if ok and hui then return hui end
+        local okCore, _ = pcall(function()
+            return CoreGui.Name
+        end)
+        if okCore then return CoreGui end
+        local lp = Players.LocalPlayer
+        return lp and lp:WaitForChild("PlayerGui")
+    end
+
+    function WindowManager.CreateWindow(config)
+        config = config or {}
+
+        -- 1. Buat Janitor & Hapus Library Lama Secara Menyeluruh
+        local janitor = CleanupManager.new()
+        janitor:PurgeExisting()
+
+        -- 2. Pastikan Lebar UI Minimal 280px namun tetap Compact (Default 300px)
+        local requestedWidth = tonumber(config.Width) or 300
+        local panelWidth = math.clamp(requestedWidth, 280, 340)
+        local panelHeight = math.clamp(tonumber(config.Height) or 380, 260, 450)
+
+        local screenGui = janitor:AddInstance(Dom.Create("ScreenGui", {
+            Name = "Slientx_CompactUI_v1_2",
+            ResetOnSpawn = false,
+            ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+            IgnoreGuiInset = true,
+            Parent = GetSafeParent()
+        }))
+
+        -- ====================================================================
+        -- FLOATING BUTTON: Bulat, Garis Tepi Putih Tebal 2.5px, Teks "Sx", DRAGGABLE
+        -- ====================================================================
+        local floatBtn = Dom.Create("TextButton", {
+            Name = "SxFloatingToggle",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -14, 0.5, -(panelHeight / 2) - 28),
+            Size = UDim2.new(0, 42, 0, 42),
+            BackgroundColor3 = Theme.BgPrimary,
+            Font = Theme.FontBold,
+            Text = "Sx",
+            TextColor3 = Theme.AccentBright,
+            TextSize = 15,
+            AutoButtonColor = false,
+            ZIndex = 25,
+            Parent = screenGui
+        })
+        Dom.Create("UICorner", {
+            CornerRadius = UDim.new(1, 0),
+            Parent = floatBtn
+        })
+        local floatStroke = Dom.Stroke(floatBtn, Theme.WhiteStroke, 2.5, 0)
+
+        -- ====================================================================
+        -- MAIN COMPACT WINDOW: Kanan Tengah Layar & TIDAK BISA DI-DRAG (Statis)
+        -- ====================================================================
+        local mainFrame = Dom.Create("Frame", {
+            Name = "MainCompactFrame",
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -14, 0.5, 0),
+            Size = UDim2.new(0, panelWidth, 0, panelHeight),
+            BackgroundColor3 = Theme.BgPrimary,
+            BorderSizePixel = 0,
+            Active = true,
+            Draggable = false,
+            ClipsDescendants = true,
+            Parent = screenGui
+        })
+        Dom.Corner(mainFrame, 8)
+        Dom.Stroke(mainFrame, Theme.Stroke, 1.2)
+
+        -- ====================================================================
+        -- HEADER ATAS "Slientx" + GARIS PEMBATAS TEGAS (Update 1.2)
+        -- ====================================================================
+        local header = Dom.Create("Frame", {
+            Name = "SlientxHeader",
+            BackgroundColor3 = Theme.BgSecondary,
+            Position = UDim2.new(0, 0, 0, 0),
+            Size = UDim2.new(1, 0, 0, 36),
+            BorderSizePixel = 0,
+            Parent = mainFrame
+        })
+
+        local winIcon = Dom.CreateIcon(header, config.Icon or "shield", 18, Theme.AccentBright)
+        if winIcon then
+            winIcon.Position = UDim2.new(0, 10, 0.5, 0)
+        end
+
+        local titleOffset = winIcon and 34 or 12
+        -- Teks Utama Header selalu diawali / bertuliskan "Slientx" sesuai permintaan
+        local headerText = config.HeaderTitle or "Slientx"
+        local headerLbl = Dom.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, titleOffset, 0, 4),
+            Size = UDim2.new(1, -(titleOffset + 70), 0, 16),
+            Font = Theme.FontBold,
+            Text = headerText,
+            TextColor3 = Theme.TextPrimary,
+            TextSize = 14,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = header
+        })
+
+        local subLbl = Dom.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, titleOffset, 0, 19),
+            Size = UDim2.new(1, -(titleOffset + 70), 0, 13),
+            Font = Theme.FontRegular,
+            Text = config.Subtitle or config.Title or "Compact Modular UI v1.2",
+            TextColor3 = Theme.TextSecondary,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Parent = header
+        })
+
+        -- Badge kecil versi di kanan header
+        local verPill = Dom.Create("Frame", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            Position = UDim2.new(1, -10, 0.5, 0),
+            Size = UDim2.new(0, 46, 0, 18),
+            BackgroundColor3 = Theme.BgTertiary,
+            Parent = header
+        })
+        Dom.Corner(verPill, 9)
+        Dom.Stroke(verPill, Theme.Accent, 1)
+        Dom.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 1, 0),
+            Font = Theme.FontBold,
+            Text = "v1.2",
+            TextColor3 = Theme.AccentBright,
+            TextSize = 10,
+            Parent = verPill
+        })
+
+        -- PEMBATAS HEADER (Garis Pembatas Tegas di bawah Header "Slientx")
+        local headerDivider = Dom.Create("Frame", {
+            Name = "SlientxHeaderDivider",
+            BackgroundColor3 = Theme.DividerAccent,
+            Position = UDim2.new(0, 0, 0, 36),
+            Size = UDim2.new(1, 0, 0, 2),
+            BorderSizePixel = 0,
+            Parent = mainFrame
+        })
+
+        -- Navigation Tab Bar (Tersembunyi secara default jika hanya pakai 1 halaman scroll langsung,
+        -- otomatis tampil rapi di bawah pembatas jika user menambahkan Tab)
+        local tabBar = Dom.Create("ScrollingFrame", {
+            Name = "TabBar",
+            BackgroundColor3 = Theme.BgSecondary,
+            Position = UDim2.new(0, 8, 0, 44),
+            Size = UDim2.new(1, -16, 0, 26),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            AutomaticCanvasSize = Enum.AutomaticSize.X,
+            ScrollBarThickness = 0,
+            ScrollingDirection = Enum.ScrollingDirection.X,
+            BorderSizePixel = 0,
+            Visible = false,
+            Parent = mainFrame
+        })
+        Dom.Corner(tabBar, 6)
+        Dom.Padding(tabBar, 3, 3, 4, 4)
+        local tabListLayout = Dom.Create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 4),
+            Parent = tabBar
+        })
+        tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            tabBar.CanvasSize = UDim2.new(0, tabListLayout.AbsoluteContentSize.X + 10, 0, 0)
+        end)
+
+        -- Container Halaman Fitur (Di bawah pembatas "Slientx", bisa di-scroll penuh!)
+        local pagesFolder = Dom.Create("Frame", {
+            Name = "FeaturesContainer",
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 8, 0, 44),
+            Size = UDim2.new(1, -16, 1, -52),
+            Parent = mainFrame
+        })
+
+        local notifyHolder = Dom.Create("Frame", {
+            BackgroundTransparency = 1,
+            AnchorPoint = Vector2.new(0.5, 1),
+            Position = UDim2.new(0.5, 0, 1, -8),
+            Size = UDim2.new(1, -16, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            ZIndex = 18,
+            Parent = mainFrame
+        })
+        Dom.Create("UIListLayout", {
+            VerticalAlignment = Enum.VerticalAlignment.Bottom,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 4),
+            Parent = notifyHolder
+        })
+
+        -- ====================================================================
+        -- LOGIKA DRAG & KLIK FLOATING BUTTON "Sx"
+        -- ====================================================================
+        local isOpen = true
+        local function ToggleUI(forceState)
+            if type(forceState) == "boolean" then
+                isOpen = forceState
+            else
+                isOpen = not isOpen
+            end
+
+            if isOpen then
+                mainFrame.Visible = true
+                Dom.Tween(mainFrame, 0.2, {
+                    Size = UDim2.new(0, panelWidth, 0, panelHeight),
+                    BackgroundTransparency = 0
+                })
+                Dom.Tween(floatBtn, 0.18, { BackgroundColor3 = Theme.BgPrimary, TextColor3 = Theme.AccentBright })
+                floatStroke.Color = Theme.WhiteStroke
+            else
+                Dom.Tween(mainFrame, 0.18, {
+                    Size = UDim2.new(0, panelWidth, 0, 0),
+                    BackgroundTransparency = 1
+                })
+                Dom.Tween(floatBtn, 0.18, { BackgroundColor3 = Theme.Accent, TextColor3 = Theme.TextPrimary })
+                floatStroke.Color = Theme.WhiteStroke
+                task.delay(0.18, function()
+                    if not isOpen and mainFrame and mainFrame.Parent then
+                        mainFrame.Visible = false
+                    end
+                end)
+            end
+        end
+
+        local isDraggingFloat = false
+        local hasMovedDuringDrag = false
+        local dragStartPos = nil
+        local buttonStartPos = nil
+        local DRAG_THRESHOLD = 5
+
+        janitor:Connect(floatBtn.InputBegan, function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+                isDraggingFloat = true
+                hasMovedDuringDrag = false
+                dragStartPos = input.Position
+                buttonStartPos = floatBtn.Position
+            end
+        end)
+
+        janitor:Connect(UserInputService.InputChanged, function(input)
+            if isDraggingFloat and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+                local delta = input.Position - dragStartPos
+                if delta.Magnitude > DRAG_THRESHOLD then
+                    hasMovedDuringDrag = true
+                end
+                if hasMovedDuringDrag then
+                    floatBtn.Position = UDim2.new(
+                        buttonStartPos.X.Scale,
+                        buttonStartPos.X.Offset + delta.X,
+                        buttonStartPos.Y.Scale,
+                        buttonStartPos.Y.Offset + delta.Y
+                    )
+                end
+            end
+        end)
+
+        janitor:Connect(UserInputService.InputEnded, function(input)
+            if isDraggingFloat and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
+                isDraggingFloat = false
+                if not hasMovedDuringDrag then
+                    ToggleUI()
+                end
+            end
+        end)
+
+        local self = setmetatable({
+            Janitor = janitor,
+            ScreenGui = screenGui,
+            MainFrame = mainFrame,
+            FloatingButton = floatBtn,
+            HeaderLabel = headerLbl,
+            SubtitleLabel = subLbl,
+            TopAccentLine = headerDivider,
+            TabBar = tabBar,
+            PagesFolder = pagesFolder,
+            NotifyHolder = notifyHolder,
+            Tabs = {},
+            DefaultFeaturePage = nil,
+            ToggleUI = ToggleUI
+        }, WindowManager)
+
+        return self
+    end
+
+    -- Helper membuat halaman fitur yang bisa di-scroll (ScrollingFrame)
+    function WindowManager:CreateFeatureScrollPage(visible)
+        local page = Dom.Create("ScrollingFrame", {
+            Name = "ScrollableFeatureList",
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, 0, 1, 0),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            ScrollBarThickness = 3,
+            ScrollBarImageColor3 = Theme.Accent,
+            Active = true,
+            BorderSizePixel = 0,
+            Visible = visible == true,
+            Parent = self.PagesFolder
+        })
+        Dom.Padding(page, 2, 12, 1, 6)
+        local listLayout = Dom.Create("UIListLayout", {
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 6),
+            Parent = page
+        })
+        Dom.BindAutoCanvas(page, listLayout, 16)
+
+        return setmetatable({
+            Window = self,
+            Janitor = self.Janitor,
+            Container = page
+        }, TabPrototype)
+    end
+
+    function WindowManager:AddTab(tabConfig)
+        tabConfig = type(tabConfig) == "string" and { Title = tabConfig } or (tabConfig or {})
+        local tabTitle = tabConfig.Title or ("Tab " .. tostring(#self.Tabs + 1))
+
+        -- Tampilkan TabBar di bawah pembatas "Slientx" dan sesuaikan posisi area scroll fitur
+        if not self.TabBar.Visible then
+            self.TabBar.Visible = true
+            self.PagesFolder.Position = UDim2.new(0, 8, 0, 74)
+            self.PagesFolder.Size = UDim2.new(1, -16, 1, -82)
+        end
+
+        local tabBtn = Dom.Create("TextButton", {
+            BackgroundColor3 = Theme.BgTertiary,
+            Size = UDim2.new(0, 0, 1, 0),
+            AutomaticSize = Enum.AutomaticSize.X,
+            Text = "",
+            AutoButtonColor = false,
+            Parent = self.TabBar
+        })
+        Dom.Corner(tabBtn, 4)
+        Dom.Padding(tabBtn, 0, 0, 7, 7)
+
+        Dom.Create("UIListLayout", {
+            FillDirection = Enum.FillDirection.Horizontal,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding = UDim.new(0, 4),
+            Parent = tabBtn
+        })
+
+        local resolvedIcon = AssetResolver.Format(tabConfig.Icon or "layers")
+        local iconImg = nil
+        if resolvedIcon then
+            iconImg = Dom.Create("ImageLabel", {
+                BackgroundTransparency = 1,
+                Image = resolvedIcon,
+                ImageColor3 = Theme.TextSecondary,
+                Size = UDim2.new(0, 13, 0, 13),
+                Parent = tabBtn
+            })
+        end
+
+        local btnLbl = Dom.Create("TextLabel", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(0, 0, 1, 0),
+            AutomaticSize = Enum.AutomaticSize.X,
+            Font = Theme.FontBold,
+            Text = tabTitle,
+            TextColor3 = Theme.TextSecondary,
+            TextSize = 11,
+            Parent = tabBtn
+        })
+
+        local tabObj = self:CreateFeatureScrollPage(false)
+        tabObj.Button = tabBtn
+        tabObj.Label = btnLbl
+        tabObj.Icon = iconImg
+
+        table.insert(self.Tabs, tabObj)
+
+        local function Activate()
+            for _, t in ipairs(self.Tabs) do
+                local active = (t == tabObj)
+                t.Container.Visible = active
+                Dom.Tween(t.Button, 0.15, {
+                    BackgroundColor3 = active and Theme.Accent or Theme.BgTertiary
+                })
+                t.Label.TextColor3 = active and Theme.TextPrimary or Theme.TextSecondary
+                if t.Icon then
+                    t.Icon.ImageColor3 = active and Theme.TextPrimary or Theme.TextSecondary
+                end
+            end
+        end
+
+        self.Janitor:Connect(tabBtn.MouseButton1Click, Activate)
+
+        if #self.Tabs == 1 then
+            Activate()
+        end
+
+        return tabObj
+    end
+
+    function WindowManager:Notify(opts)
+        opts = opts or {}
+        local toast = Dom.Create("Frame", {
+            BackgroundColor3 = Theme.BgSecondary,
+            Size = UDim2.new(1, 0, 0, 36),
+            BorderSizePixel = 0,
+            Parent = self.NotifyHolder
+        })
+        Dom.Corner(toast, 6)
+        Dom.Stroke(toast, Theme.Accent, 1)
+        Dom.Padding(toast, 5, 5, 8, 8)
+
+        Dom.CreateHeaderRow(toast, (opts.Title or "Slientx") .. ": " .. (opts.Content or ""), opts.Icon or "bell", 0)
+
+        task.delay(opts.Duration or 2.5, function()
+            if toast and toast.Parent then
+                toast:Destroy()
+            end
+        end)
+    end
+
+    function WindowManager:Destroy()
+        self.Janitor:Destroy()
+    end
+
+    return WindowManager
+end)
+
+local SxUI = LoadModule("WindowManager")
+return SxUI
